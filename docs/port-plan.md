@@ -155,17 +155,9 @@ device pages → the device repository of its own.
 
 ## The open questions
 
-These need the phone, and are the reason nothing below is written yet:
-
-1. **Where does the phone's own system live in DRAM?** The loader needs a window that nothing else
-   uses. The tree's `/memory` says `0x40000000` + 8 GiB and nothing more; the secure world, the
-   SCP and the modem have their own places that the tree does not describe here.
-2. **What does the preloader leave running?** Which cores are on, what state is the GIC in, is
-   the display pipeline already scanning, is UFS already negotiated. The loader can read this out
-   of the phone (it is the phone's own preloader) rather than guess it.
-3. **What is the touch controller, and on which pins?** The tree's `/touch` is a GPIO interrupt;
-   the FocalTech firmware is `focaltech_ts_fw_00.bin`. Which SPI (if any) it is on, and whether
-   the loader has to send it its firmware, is what has to be found.
+1. **Where does the phone's own system live in DRAM?** *Answered.* DRAM base `0x40000000` (8 GiB). Loader links at `0x40080000`, small root ramdisk at `0x48000000`, framebuffer at `0x76a10000`.
+2. **What does the preloader leave running?** *Answered.* Display engine `OVL0_2L` is scanning at 1080x2400 (pitch 4352). GIC-v3 is initialized in EOImode=1 (loader clears to 0). UFS host controller is active and handed over.
+3. **What is the touch controller, and on which pins?** *Answered.* FocalTech FT3681 (`TM_FT3681_00`) on I2C0 (`0x11015000`) at slave `0x38`. Pins: SCL0=GPIO 204, SDA0=GPIO 205, Reset=GPIO 20, IRQ=GPIO 21 (GIC SPI 245 = GIC interrupt 277). Full architecture in `docs/touchscreen-ft3681.md`.
 4. **Where is the system's partition, and how is it read?** *Half answered.* The phone's GPT has
    been read off the phone (see `docs/ios-firmware.md`): `userdata` is 226 GiB and runs to the end
    of the disk, with `flashinfo` the last partition and nothing free. The system's partition has

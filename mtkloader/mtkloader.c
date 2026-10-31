@@ -427,6 +427,7 @@ static void out_dec(uint64_t v)
 }
 
 #include "mtkconnsys.h"         /* Wi-Fi step 1: Android's device tree on CONNSYS, printed (uses out()) */
+#include "mtki2c.h"
 
 /* ---- run state ---- */
 
@@ -2191,20 +2192,11 @@ static uint32_t cpu_mhz(void)
  */
 #define TOUCH_STAGE         0x49000000ULL
 
+#if 0
 /* The SPI clock mux as we found it, so that Android can be given it back that way. */
 static uint32_t touch_clk_cfg2;
 static int touch_clk_cfg2_seen;
 
-/*
- * The controller keeps its firmware in RAM and loses it at every reset, so whoever boots the
- * phone has to send it afresh -- Android does this at every start, and so must we before a
- * kernel of ours can expect to read a finger. This is that sequence: open the bus, reset the
- * chip into its ROM bootloader, send the image as one message, pause, and give the go command,
- * after which the chip introduces itself unasked saying what it now runs.
- *
- * Returns the mode it reached: 1 or 2 mean the firmware is up. Nothing here is fatal -- a phone
- * whose screen cannot be touched still boots.
- */
 static uint8_t touch_bring_up_once(void)
 {
 	static const uint32_t gate_clr[4] = { 0x8c, 0xa8, 0xc4, 0x84 };
@@ -2280,6 +2272,7 @@ static uint8_t touch_bring_up_once(void)
 	out("touch: it never said it was up\n");
 	return 0;
 }
+#endif
 
 /*
  * The whole sequence, up to six times, waiting a little longer between tries each time. Now and then the chip takes the image and then says
@@ -2294,22 +2287,61 @@ static uint8_t touch_bring_up_once(void)
  */
 static uint8_t touch_bring_up(void)
 {
-	out("touch: not brought up -- this board's touch is not the reference board's TCM\n");
-	return 0;
-#if 0
-	for (int attempt = 1; attempt <= 6; attempt++) {
-		uint8_t mode = touch_bring_up_once();
+	out("touch: probing MT6893 I2C0 for FocalTech FT3681...\n");
+	fts_hw_reset();
+	mtk_i2c0_init_hw();
 
-		if (mode == TCM_MODE_APPLICATION || mode == TCM_MODE_HOSTDOWNLOAD) {
-			return mode;
-		}
-		out("touch: attempt ");
-		out_dec((uint32_t)attempt);
-		out(" failed, starting over\n");
-		dbg_delay_ms(100 * (uint32_t)attempt);  /* a little longer each time for the chip to settle */
+	out("i2c0: TIMING=");
+	out_hex(rd32(I2C0_BASE + I2C_REG_TIMING));
+	out(" CLK_DIV=");
+	out_hex(rd32(I2C0_BASE + I2C_REG_CLOCK_DIV));
+	out(" CONTROL=");
+	out_hex(rd32(I2C0_BASE + I2C_REG_CONTROL));
+	out(" WRAP_C_STA=");
+	out_hex(rd32(IMP_IIC_WRAP_C_BASE + 0xe00));
+	out("\n");
+
+	uint8_t chip_h = 0, chip_l = 0, fw_ver = 0, vendor_id = 0, td_status = 0;
+	int r_h = fts_read_byte(FTS_REG_CHIP_ID_H, &chip_h);
+	int r_l = fts_read_byte(FTS_REG_CHIP_ID_L, &chip_l);
+	int r_fw = fts_read_byte(FTS_REG_FW_VER, &fw_ver);
+	int r_vid = fts_read_byte(FTS_REG_VENDOR_ID, &vendor_id);
+	int r_td = fts_read_byte(FTS_REG_TD_STATUS, &td_status);
+
+	out("touch: probe chip_id=");
+	if (r_h == 0 && r_l == 0) {
+		out_hex(((uint32_t)chip_h << 8) | chip_l);
+	} else {
+		out("FAIL(err=");
+		out_dec((uint32_t)(r_h ? -r_h : -r_l));
+		out(")");
 	}
+	out(" fw_ver=");
+	if (r_fw == 0) {
+		out_hex(fw_ver);
+	} else {
+		out("ERR");
+	}
+	out(" vendor=");
+	if (r_vid == 0) {
+		out_hex(vendor_id);
+	} else {
+		out("ERR");
+	}
+	out(" points=");
+	if (r_td == 0) {
+		out_dec(td_status & 0x0fu);
+	} else {
+		out("ERR");
+	}
+	out("\n");
+
+	if (r_h == 0 && r_l == 0 && chip_h == 0x56 && chip_l == 0x62) {
+		out("touch: FocalTech FT3681 active and ready on I2C0 (0x38)\n");
+		return 1;
+	}
+
 	return 0;
-#endif
 }
 
 /* ---- the big cores' clock ---- */
