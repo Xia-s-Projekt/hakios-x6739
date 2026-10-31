@@ -164,5 +164,8 @@ These need the phone, and are the reason nothing below is written yet:
 3. **What is the touch controller, and on which pins?** The tree's `/touch` is a GPIO interrupt;
    the FocalTech firmware is `focaltech_ts_fw_00.bin`. Which SPI (if any) it is on, and whether
    the loader has to send it its firmware, is what has to be found.
-4. **Where is the system's partition, and how is it read?** `tools/gpt-carve.py` carves it out of
-   the end of `userdata` (226 GiB here), but the GPT has to be read off this phone first.
+4. **Where is the system's partition, and how is it read?** *Half answered.* The phone's GPT has
+   been read off the phone (see `docs/ios-firmware.md`): `userdata` is 226 GiB and runs to the end
+   of the disk, with `flashinfo` the last partition and nothing free. The system's partition has
+   to be carved out of `userdata`, which means shrinking it, and the image is read by the
+   kernel's own UFS driver — which does not exist yet.
