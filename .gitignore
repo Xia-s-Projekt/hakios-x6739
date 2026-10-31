@@ -1,0 +1,25 @@
+# the phone's own firmware, pulled into fw-*/ by pull-firmware.sh (the vendor's)
+fw-*/
+# the phone's own device tree (the phone's; only its numbers are quoted, never the tree)
+*.dtb
+device-tree.dtb
+# the loader's build output
+mtkloader/*.o
+mtkloader/*.bin
+mtkloader/touchfw.h
+mtkloader/font8x16.h
+# the headers build.sh makes at build time and that must never be committed
+mtkloader/touchfw.h
+mtkloader/font8x16.h
+# the runs' logs
+logs/
+*.log
+# the XNU payload and the system image
+*.packfs
+xnusys*
+# the XNU identity, made from the user's own IPSW (identity.h)
+xnuloader/identity.h
+# the iOS firmware out of Apple's archive (tools/fetch-ios.sh): never in the repository
+refs/ios/
+# macOS
+.DS_Store
