@@ -161,6 +161,17 @@ static const uint8_t core_order[CPU_COUNT] = {
 #ifndef XNU_ROOT_STORAGE
 #define XNU_ROOT_STORAGE    1
 #endif
+/*
+ * 1: the small root (the payload's root.apfs) is the kernel's root, even though the big system
+ * image is meant to be. 0: it is the second disk, as usual.
+ *
+ * MT6893: the big image stays on the UFS and the kernel's own driver reads it -- but that driver
+ * does not exist yet, so there is nothing to read it and no root at all. The small root is what
+ * the first runs use, so that the loader, the kernel and launchd are exercised at all.
+ */
+#ifndef XNU_SMALL_ROOT
+#define XNU_SMALL_ROOT      1
+#endif
 #if XNU_ROOT_STORAGE
 #define XNU_ROOT_ARG        "rd=md0 ufs_root=1"     /* (rd=md0 for libignition's "ramdisk" boot) */
 #else
@@ -943,6 +954,12 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 	 * "RAMDisk" becomes /dev/md0, which is the root; "RAMDisk1" becomes /dev/md1. With the big
 	 * system image present it is the root, and the payload's small one is the second disk --
 	 * the same way round as xnuloader has it.
+	 *
+	 * MT6893: with the kernel owning the root (ufs_root=1) there is no big image in memory
+	 * yet, because the kernel's UFS driver does not exist to fetch one. So md0 has to be the
+	 * small root, or the kernel finds no root at all and never reaches launchd. That is what
+	 * XNU_SMALL_ROOT is for: it is what the first runs use, and it goes away when the UFS
+	 * driver can read the real image.
 	 */
 	dt_begin(&w, "memory-map");
 	if (sys_size != 0) {
@@ -955,7 +972,7 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 	} else if (rd_size != 0) {
 		uint64_t rd_reg[2] = { rd_pa, rd_size };
 		/* (with the system image on the eMMC the payload stays md1, where stage0 mounts it) */
-		dt_prop(&w, XNU_ROOT_STORAGE ? "RAMDisk1" : "RAMDisk", rd_reg, sizeof(rd_reg));
+		dt_prop(&w, XNU_ROOT_STORAGE && !XNU_SMALL_ROOT ? "RAMDisk1" : "RAMDisk", rd_reg, sizeof(rd_reg));
 	}
 	dt_end(&w);
 	dt_end(&w);
