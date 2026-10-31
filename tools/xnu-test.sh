@@ -25,9 +25,9 @@ KERNEL=${XNU_KERNEL:-$ROOT/mach.development.mt6893}
 [ -f "$KERNEL" ] || KERNEL="$COMMON/prebuilt/mach.development.bcm2837"
 
 # how long the kernel runs before it hands the log back
-SECS=${XNU_SECS:-45}
+SECS=${XNU_SECS:-120}
 # the kernel's own command line; the clock comes from this machine
-XNU_ARGS=${XNU_ARGS:-cpus=1}
+XNU_ARGS=${XNU_ARGS:-"cpus=4 fb_diff=1"}
 # the device tree offers the kernel exactly this many cores; "cpus=" in XNU_ARGS should match
 CORES=${XNU_CORES:-$(expr "$XNU_ARGS" : '.*cpus=\([0-9]*\)' || echo 1)}
 [ -n "$CORES" ] || CORES=1
@@ -63,10 +63,49 @@ assert struct.unpack('<Q', b[0x8000:0x8008])[0] == 0x100005d92
 struct.pack_into('<Q', b, 0x8000, 0x100005d17)
 assert b[0x5a0:0x5a4] == bytes.fromhex('a0000035')
 b[0x5a0:0x5a4] = bytes.fromhex('1f2003d5')
+
+assert b[0x3684:0x3688] == bytes.fromhex('80010035')
+assert b[0x369c:0x36a0] == bytes.fromhex('c000f837')
+assert b[0x36a4:0x36a8] == bytes.fromhex('41008052')
 assert b[0x36c8:0x36cc] == bytes.fromhex('a1050054')
-b[0x36c8:0x36cc] = bytes.fromhex('2d000014')
+
+# Silence launchd stdout+stderr to /dev/null when /etc/quiet is present, bypassing launchd log floods
+b[0x3684:0x3688] = bytes.fromhex('e0010035')
+b[0x369c:0x36a0] = bytes.fromhex('2001f837')
+b[0x36a4:0x36c8] = bytes.fromhex('21008052a7050094e00319aa41008052a4050094e00319aa8d050094e06f40f92e000014')
 open(p, 'wb').write(b)
 "
+python3 -c "
+import plistlib
+p = '$ROOT/build-root/LaunchDaemons/com.apple.SpringBoard.plist'
+pl = plistlib.load(open(p, 'rb'))
+env = pl.setdefault('EnvironmentVariables', {})
+env['OS_ACTIVITY_DT_MODE'] = 'YES'
+env['OS_ACTIVITY_MODE'] = 'debug'
+plistlib.dump(pl, open(p, 'wb'))
+"
+touch "$ROOT/build-root/etc/quiet"
+cat > "$ROOT/build-root/etc/rc" << 'EOF'
+# Hand process 1 over to the real iOS launchd
+exec /sbin/launchd.ios
+EOF
+python3 -c "
+import plistlib
+p = '$ROOT/build-root/LaunchDaemons/com.hakios.demo.plist'
+pl = plistlib.load(open(p, 'rb'))
+pl['LimitLoadToSessionType'] = 'System'
+plistlib.dump(pl, open(p, 'wb'))
+"
+cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
+# Commands run by the launchd job com.hakios.demo (see com.hakios.demo.plist).
+/redwood/bin/hello_dyn started by launchd
+/redwood/bin/svc_test
+/redwood/bin/surf_test
+/bin/ps -A
+/redwood/bin/rwtouch wait 35 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
+/redwood/bin/rwtouch wait 50 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
+/redwood/bin/rwtouch wait 70 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
+EOF
 python3 "$COMMON/tools/apfs/mkapfs.py" -z --plain fw -o "$ROOT/build-root.apfs" "redwood=$ROOT/build-root" >/dev/null
 rm -rf "$ROOT/build-root"
 python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" \
