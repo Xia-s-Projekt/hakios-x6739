@@ -74,6 +74,24 @@ properties (the screen class, the artwork scale, the haptics, the camera).
 The system image (`userland/system.apfs`) has **not** been built yet: the unpacking step was
 still running when this was written.
 
+## The loader's build
+
+The loader (`mtkloader/build.sh`) needs two headers that are made at build time and never
+committed:
+
+- `identity.h`, from the iPhone X's device tree — described above.
+- `font8x16.h`, the console's 8x16 text font. The reference port rasterizes it with
+  `tools/mkfont8x16.swift` (CoreGraphics, Menlo Bold 13pt), which needs macOS. This port uses
+  `tools/mkfont8x16.c` instead: FreeType renders the same glyphs from a monospaced bold font
+  (Liberation Mono Bold, standing in for Menlo), and the result is the same 8x16 1-bit cell
+  layout the console expects — one byte per row, the leftmost pixel in the top bit. It needs
+  `cc` and FreeType's headers (`pkg-config freetype2`).
+
+The touch firmware (`touchfw.h`) is the reference board's TCM controller's, and this board's
+touch is not that controller, so the loader does not talk to it (see the comment on
+`touch_bring_up` in `mtkloader.c`). `build.sh` writes an empty image in its place when the
+phone's own firmware is not there, so the loader compiles without it.
+
 
 ## The two things the port actually needs from the iOS side
 

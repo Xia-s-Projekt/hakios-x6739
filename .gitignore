@@ -6,8 +6,6 @@ device-tree.dtb
 # the loader's build output
 mtkloader/*.o
 mtkloader/*.bin
-mtkloader/touchfw.h
-mtkloader/font8x16.h
 # the headers build.sh makes at build time and that must never be committed
 mtkloader/touchfw.h
 mtkloader/font8x16.h
@@ -21,5 +19,9 @@ xnusys*
 xnuloader/identity.h
 # the iOS firmware out of Apple's archive (tools/fetch-ios.sh): never in the repository
 refs/ios/
+# the scratch directory the build and the fetch use: never /tmp, which is a RAM-backed tmpfs
+refs/.tmp/
+# python's byte-cache
+__pycache__/
 # macOS
 .DS_Store
