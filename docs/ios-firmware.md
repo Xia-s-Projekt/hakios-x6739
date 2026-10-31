@@ -71,8 +71,10 @@ iPhone X's own identity — `model` = `iPhone10,3`, `manufacturer` = `Apple Inc.
 `AppleARM64` and `iPhone10,3`, `device_type` = `bootrom`, plus the `/product` node's 61
 properties (the screen class, the artwork scale, the haptics, the camera).
 
-The system image (`userland/system.apfs`) has **not** been built yet: the unpacking step was
-still running when this was written.
+The system image has been built: `userland/system.apfs`, 2.5 GB. The unpacking gave
+2.9 GB of root filesystem, 26 MB of cryptex, 11 MB of App cryptex and the 2.6 GB dyld shared
+cache; `mkapfs.py` made the container of 604,423 blocks of 4096 bytes, and the common tree's
+own checker says it is clean (`apfsck -cw: clean`).
 
 ## The loader's build
 
@@ -92,25 +94,60 @@ touch is not that controller, so the loader does not talk to it (see the comment
 `touch_bring_up` in `mtkloader.c`). `build.sh` writes an empty image in its place when the
 phone's own firmware is not there, so the loader compiles without it.
 
+The loader compiles and links to `mtkloader/mtkloader.bin` (38 KB, an ARM64 Image). Two things
+had to be right for that: the compiler is Ubuntu's clang, which turns the stack protector on by
+default and the loader has no libc to provide `__stack_chk_guard` (`-fno-stack-protector`), and
+the core order — the tree of the reference board, which this board's layout does not match — had
+to be rewritten (see `docs/mt6893-facts.md`).
 
-## The two things the port actually needs from the iOS side
+## The payload and the flashable image
 
-**The identity header.** The loader builds its own device tree for the hardware the X6739 really
-has, but copies the iPhone's identity properties into it, so that the user space sees the phone
-its files were built for. `identity.h` is that copy: a table of properties and their bytes.
-Without it the loader can be built (`mkidentity.sh --placeholder`) and can boot the open kernel
-under QEMU, but the iOS user space will not come up.
+`tools/mkpayload.py` builds the "XNUP" payload the loader reads out of the boot image: the XNU
+kernel (the common tree's prebuilt `mach.development.bcm2837`, 16 MB), the small root image
+(`userland/root.apfs`, 4 MB, which the loader puts in memory as the second disk) and the
+kernel's command line. The system image is **not** in the payload: it is 2.5 GB and a boot image
+is 64 MB. On this board the kernel reads it off the UFS (`ufs_root=1`), so the loader's own
+storage path is compiled out.
 
-**The system image** (`userland/system.apfs`, about 2.5 GB): the chosen part of the root
-filesystem, the dyld shared cache, the two cryptexes and the loader's own `stage0` as
-`/sbin/launchd`. It is an APFS container, built by the common tree's `tools/apfs/mkapfs.py`.
+`tools/chainboot.py` puts the loader in front of Android's kernel in the phone's own boot image.
+That image is a **MediaTek** one, not the AOSP one the reference port's script knew:
+
+| | what it is |
+|---|---|
+| the header | says version 4, but keeps only three meaningful fields: the kernel's size (12,820,339), a "kernel address" that is not an address (0x303a99) and a ramdisk size in 512-byte units (0x200001aa = 1 GiB) that describes the ramdisk the vendor built in `vendor_boot`, not the bytes in this file. The page size is not in the header either |
+| the kernel | a gzip stream at offset 4096, 12.8 MB, 34,955,284 bytes unpacked |
+| the ramdisk | at the next 4096-byte boundary (12,824,576), beginning with MediaTek's own ramdisk magic `0x184c2102`; 3.1 MB of real content, then 51 MB of the vendor's zero padding |
+| the end | Android's verified-boot footer ("AVBf") in the last 44 bytes |
+
+So the sections are found by what they are rather than by what the header says, and the ramdisk
+is trimmed to what holds anything. The result is exactly 64 MiB: the header, the new kernel
+(gzip of the loader, then Android's own Image, then the payload), the ramdisk, the padding, and
+the verified-boot footer last.
+
+The device tree is **not** in `boot_a`. It is in `vendor_boot_a` (a "VNDRBOOT" image), 267,283
+bytes at offset 55,984,192 of that partition. LK reads it and hands it to the loader, which only
+passes it on to Android's kernel when it chains back.
 
 ## Where the system image goes on the phone
 
 The X6739 has **no `xnusys` partition** (the MT6768 reference port has one, carved out of the end
 of `userdata` with `tools/gpt-carve.py`). `userdata` here is 226 GiB, so there is room, but the
-partition has to be carved out of this phone's GPT first — and that is one of the open questions in
-`docs/port-plan.md`.
+partition has to be carved out of this phone's GPT first.
+
+That GPT has now been read off the phone (`dd` of the first 64 KiB of `/dev/block/sdc`, whose
+GPT header is at byte 4096; the sectors are 4096 bytes). The partitions that matter:
+
+| partition | first LBA | last LBA | size |
+|---|---|---|---|
+| `boot_a` | 195,840 | 212,223 | 64 MiB |
+| `super` | 368,640 | 3,146,541 | 10.6 GiB |
+| `tranfs` | 3,146,542 | 3,223,551 | 300 MiB |
+| `userdata` | 3,223,552 | 62,476,282 | 226.0 GiB |
+| `flashinfo` | 62,476,283 | 62,480,378 | 16 MiB |
+
+and the last usable LBA is 62,480,378, so there is nothing free to carve out of: `userdata`
+runs to the end of the disk and `flashinfo` is the last partition. The system image partition
+has to be made out of `userdata` (the reference port's way), which means shrinking it.
 
 The port's storage decision (the kernel owns the root, `ufs_root=1`) means the loader does **not**
 read the image: the kernel's own UFS driver does. That driver does not exist yet, in the common
@@ -118,6 +155,8 @@ tree or anywhere else in the project — it is the largest single piece of new c
 
 ## What has not been done
 
-The system image (`userland/system.apfs`) has not been built yet, and nothing has been booted:
-the loader has not been compiled, no image has been flashed, and the phone has never run
-HakiOS. The X6739 has no `xnusys` partition either — see above.
+Nothing has been booted. The loader compiles and the flashable image is built, but no image has
+been flashed, the phone has never run HakiOS, and the system image partition has not been carved
+out of `userdata`. The kernel's UFS driver — the thing that would read the system image — does
+not exist yet.
+
