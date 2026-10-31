@@ -20,7 +20,10 @@ WATCH=${XNU_WATCH:-$((SECS + 240))}
 TEST_FLAGS=(-DXNU_WDT_SECONDS=0 -DXNU_CORES=$CORES -DXNU_WATCH_SECONDS=$WATCH
 	"-DXNU_RETURN_AFTER=\"$SECS\"" "-DXNU_EXTRA_ARGS=\"$XNU_ARGS epoch=$(date +%s)\"")
 "$ROOT/mtkloader/build.sh" "${TEST_FLAGS[@]}" "$@" >/dev/null
-python3 "$ROOT/mtkloader/build_flashed.py" >/dev/null
+# the payload (the XNU kernel and the small root) and the flashable image
+python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" >/dev/null
+python3 "$ROOT/tools/chainboot.py" "$ROOT/backup/boot_a.img" "$ROOT/mtkloader/mtkloader.bin" \
+	"$ROOT/xnu-flashed-slot_a.img" "$ROOT/build-payload.bin" >/dev/null
 [ "$(adb -s $S get-state 2>/dev/null)" = device ] && adb -s $S reboot bootloader
 for i in $(seq 1 120); do fastboot devices | grep -q $S && break; sleep 1; done
 # (fastboot -s waits for ever for a phone that is not there: a run would hang for hours)
