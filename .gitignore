@@ -16,6 +16,7 @@ logs/
 *.packfs
 xnusys*
 # the payload and the flashable boot image the run builds
+build-root.apfs
 build-payload.bin
 xnu-flashed-slot_a.img
 # the phone's own boot image, pulled off the phone (backup/): the vendor's
@@ -28,5 +29,6 @@ refs/ios/
 refs/.tmp/
 # python's byte-cache
 __pycache__/
+.antumbra_state
 # macOS
 .DS_Store
