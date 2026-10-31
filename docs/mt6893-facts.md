@@ -52,12 +52,7 @@ Read out of `/soc` in the tree:
 
 Three of these matter for the port:
 
-- **The SPI is the same kind.** `mediatek,mt6765-spi` is what the reference port's touch driver
-  was written against, so the SPI code there carries over — the *pins* are the question, not the
-  controller.
-- **The touch is not on the SPI.** The tree's `/touch` node says only `mediatek,touch` and has no
-  `reg`, so it is a *GPIO* interrupt, not a controller behind an SPI bus. The reference port's
-  OmniVision TD4160 over SPI2 is not this phone's touch.
+- **The touch is on I2C0, not SPI.** The touch controller is a FocalTech FT3681 at slave address `0x38` on `/soc/i2c@11015000` (I2C0). SCL0 is Pin 204 (Mode 1), SDA0 is Pin 205 (Mode 1), Reset is Pin 20 (Mode 0), and IRQ is Pin 21 (Mode 0, GIC SPI 245 = GIC interrupt 277).
 - **The console UART is the same address**, so the reference loader's UART code carries over.
 
 ## The phone's firmware
@@ -215,31 +210,17 @@ phone's own configuration files say it is a Tianma NT37705 — so the framebuffe
 size, a different pitch and a different layer arrangement, and the timing has to come from the
 phone rather than from the panel's name.
 
-### The touch is a different chip
+### The touch is a FocalTech FT3681 on I2C0
 
-The reference port's touch is an OmniVision TD4160, a TCM controller on SPI2, whose firmware the
-loader carries. This phone's is a FocalTech (its firmware is `focaltech_ts_fw_00.bin`), and the
-tree's `/touch` node is a GPIO interrupt with no controller behind it. The SPI driver is the same
-kind (`mediatek,mt6765-spi`), so the bus code carries over; the controller, the firmware format
-and the pins do not.
+The reference port's touch is an OmniVision TD4160, a TCM controller on SPI2. This phone's is a **FocalTech FT3681** (`TM_FT3681_00`) on **I2C0** (`/soc/i2c@11015000`) at slave address `0x38`.
+- Chip ID: `0x5662` (High `0x56` @ `0xA3`, Low `0x62` @ `0x9F`), FW Version: `0x44` @ `0xA6`, Vendor ID: `0x8D` @ `0xA8`.
+- SCL0 is Pin 204 (Mode 1), SDA0 is Pin 205 (Mode 1).
+- Reset GPIO is Pin 20 (Mode 0), Interrupt GPIO is Pin 21 (Mode 0, GIC SPI 245 = GIC interrupt 277).
+- Power supply: MT6360 PMIC LDO2 (`vtp`), default on.
+- See `docs/touchscreen-ft3681.md` for complete register mappings, APDMA clocking, and XNU driver specifications.
 
-## What has to be written
+## Port status
 
-In the order that gets to a boot with nothing of the phone's:
-
-1. **The loader** (`mtkloader/`): the platform bring-up for MT6893 — DRAM map, GIC-v3, the core
-   order and PSCI, the clock gate for the storage, the framebuffer.
-2. **The storage**: UFS, not eMMC. The kernel owns the root — see above.
-3. **The device tree the kernel sees**: the loader builds XNU's device tree itself; the tree the
-   kernel gets is the loader's, not the phone's.
-4. **Then the drivers**, in the reference port's order: CPU freq → buttons and touch → storage →
-   GPU → audio and battery → Wi-Fi.
-
-## What is not here yet
-
-- No `pull-firmware.sh` run against the phone (the script is written; the firmware has not been
-  pulled).
-- No loader image has been built, and nothing has been flashed: **nothing on this phone has been
-  booted with HakiOS**.
-- The kernel sources of the reference port (`kernel/bsd/dev/redwood_*.c`) are the MT6768 board's;
-  every address in them is that board's.
+- **Boot & Display:** Confirmed working. `mtkloader` boots XNU, iOS 16.5 SpringBoard renders onto the 1080x2400 panel (framebuffer at `0x76a10000`, pitch 4352 on `0x14001000` OVL0_2L).
+- **Touch Screen:** Stage 1 in progress. Controller identified as FocalTech FT3681 on I2C0. Register writes confirmed 16-bit wide; APDMA and bitbang interfaces defined in `mtkloader/mtki2c.h`.
+- **Userland Touch Input:** Confirmed working. `backboardd` runs and consumes `/dev/hakios-touch`. Synthetic touch injection via `rwtouch` functions properly. Physical driver (`bsd/dev/x6739_ft3681.c`) next.
