@@ -1038,7 +1038,10 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 		dt_prop_u32(&w, "cpu-id", (uint32_t)i);
 		dt_prop_u64(&w, "timebase-frequency", cntfrq);
 		dt_prop_u64(&w, "fixed-frequency", cntfrq);
-		dt_prop_u64(&w, "clock-frequency", 1800000000ULL);
+		uint64_t clock_freq = (core == 7) ? CPU_CLOCK_PRIME :
+		                      (core >= 4) ? CPU_CLOCK_BIG :
+		                                    CPU_CLOCK_LITTLE;
+		dt_prop_u64(&w, "clock-frequency", clock_freq);
 		dt_prop_u64(&w, "bus-frequency", 100000000ULL);
 		dt_prop_u64(&w, "memory-frequency", 100000000ULL);
 		dt_prop_u64(&w, "peripheral-frequency", 24000000ULL);
