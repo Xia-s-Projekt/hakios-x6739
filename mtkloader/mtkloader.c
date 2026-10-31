@@ -527,6 +527,51 @@ static void display_report(void)
 	}
 }
 
+static void ufs_probe(void)
+{
+	out("== UFS Host Controller Handover (0x11270000) ==\n");
+	uint32_t cap = rd32(UFSHCI_BASE + 0x00);
+	uint32_t ver = rd32(UFSHCI_BASE + 0x08);
+	uint32_t did = rd32(UFSHCI_BASE + 0x10);
+	uint32_t pmid = rd32(UFSHCI_BASE + 0x14);
+	uint32_t is_reg = rd32(UFSHCI_BASE + 0x20);
+	uint32_t ie_reg = rd32(UFSHCI_BASE + 0x24);
+	uint32_t hcs = rd32(UFSHCI_BASE + 0x30);
+	uint32_t hce = rd32(UFSHCI_BASE + 0x34);
+	uint32_t utrlba = rd32(UFSHCI_BASE + 0x50);
+	uint32_t utrlbau = rd32(UFSHCI_BASE + 0x54);
+	uint32_t utrldbr = rd32(UFSHCI_BASE + 0x58);
+	uint32_t utrlrsr = rd32(UFSHCI_BASE + 0x60);
+	uint32_t utmrlba = rd32(UFSHCI_BASE + 0x70);
+	uint32_t utmrlbau = rd32(UFSHCI_BASE + 0x74);
+	uint32_t utmrlrsr = rd32(UFSHCI_BASE + 0x80);
+
+	out("  CAP:     "); out_hex(cap);
+	out("  VER:     "); out_hex(ver);
+	out(" (v"); out_dec((ver >> 8) & 0xff); out("."); out_dec((ver >> 4) & 0xf); out(")\n");
+	out("  DID:     "); out_hex(did);
+	out("  PMID:    "); out_hex(pmid);
+	out("\n");
+	out("  HCE:     "); out_hex(hce);
+	out("  HCS:     "); out_hex(hcs);
+	out(" (DP="); out_dec(hcs & 1);
+	out(" UTRLRDY="); out_dec((hcs >> 1) & 1);
+	out(" UTMRLRDY="); out_dec((hcs >> 2) & 1);
+	out(" UCMD_RDY="); out_dec((hcs >> 3) & 1);
+	out(" LinkState="); out_dec((hcs >> 8) & 0xf);
+	out(")\n");
+	out("  IS:      "); out_hex(is_reg);
+	out("  IE:      "); out_hex(ie_reg);
+	out("\n");
+	out("  UTRLBA:  "); out_hex(utrlbau); out(":"); out_hex(utrlba);
+	out("  RSR:     "); out_hex(utrlrsr);
+	out("  DBR:     "); out_hex(utrldbr);
+	out("\n");
+	out("  UTMRLBA: "); out_hex(utmrlbau); out(":"); out_hex(utmrlba);
+	out("  RSR:     "); out_hex(utmrlrsr);
+	out("\n");
+}
+
 /* Opaque pixels only from here on: XNU's console writes alpha 0. */
 static void display_alpha_off(void)
 {
@@ -3499,6 +3544,7 @@ void mtkloader_main(uint64_t dtb)
 	out_hex(dtb);
 	out("\n");
 	display_report();
+	ufs_probe();
 	connsys_dt_report(dtb);         /* Wi-Fi step 1: what Android's tree says of CONNSYS (mtkconnsys.h) */
 	run_xnu();
 }
