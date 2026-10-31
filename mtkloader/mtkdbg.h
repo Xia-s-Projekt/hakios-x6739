@@ -41,6 +41,9 @@
 #define RAMOOPS_CONSOLE_SIZE 0x40000u
 #define RAMOOPS_PMSG         0x48130000ULL
 #define RAMOOPS_PMSG_SIZE    0x40000u
+/* the dmesg zone, the part of the ramoops before the console: 0x48090000 to 0x480ef000 */
+#define RAMOOPS_DMESG        0x48090000ULL
+#define RAMOOPS_DMESG_SIZE   0x5f000u
 #define RAMOOPS_SIG          0x43474244u
 
 /*
@@ -127,52 +130,48 @@ static inline void __attribute__((noreturn)) wdt_reset(void)
 /* ---- ramoops console ---- */
 
 /*
- * MT6893: the console zone holds plain text -- what /sys/fs/pstore/console-ramoops-0 shows on
- * this phone begins with "0 returned 1 after 1251 usecs" and the kernel's log, with no header of
- * our own in front of it.
- *
- * The reference port wrote its own header (sig "DBGC", start, size) at the front of the zone and
- * kept its text after it, so that the loader could find where it had left off. That header is
- * not there on this board: the zone belongs to Android's pstore driver, and the driver expects
- * the text to start at the beginning of the zone.
- *
- * So the loader writes at the start of the zone and keeps its own position in a variable -- the
- * loader runs once per boot, and the zone is cleared by the driver when Android reads it. A
- * second run without an Android boot in between would append, which is visible in the log and
- * harmless.
+ * Linux fs/pstore/ram_core.c (verified in this phone's boot_a kernel at 0x63bd2c and 0x63d770):
+ * both ramoops:console (0x480ef000) and ramoops:pmsg (0x48130000) are initialized via
+ * ramoops_init_prz with sig = 0, so persistent_ram_post_init checks for a 12-byte
+ * struct persistent_ram_buffer header with sig = 0 ^ 0x43474244 ("DBGC") at the start of the
+ * zone. Without this header, Android's pstore driver resets the zone on boot and discards its
+ * contents.
  */
-#define PLOG_DATA ((volatile char *)RAMOOPS_CONSOLE)
-#define PLOG_CAP  RAMOOPS_CONSOLE_SIZE
+struct ramoops_hdr {
+	uint32_t sig;
+	uint32_t start;
+	uint32_t size;
+};
 
-/* Where the loader's text ends. Kept in a variable, not in the zone. */
-static uint32_t plog_at;
+#define PLOG_HDR  ((volatile struct ramoops_hdr *)RAMOOPS_CONSOLE)
+#define PLOG_DATA ((volatile char *)(RAMOOPS_CONSOLE + sizeof(struct ramoops_hdr)))
+#define PLOG_CAP  (RAMOOPS_CONSOLE_SIZE - sizeof(struct ramoops_hdr))
 
-/*
- * Clear the console zone and start at its beginning.
- *
- * The zone holds the *previous* boot's kernel log -- /sys/fs/pstore/console-ramoops-0 on this
- * phone begins with the last kernel's messages, not with ours. The loader writes its own text
- * from the start of the zone, so the zone is cleared first: otherwise the loader's log and the
- * old kernel's would be one run of text with no way to tell them apart.
- *
- * The cost is the previous kernel's console log, which is gone once the loader runs. The
- * loader's own rescue path (rescue_log) is what keeps the XNU log, and that is appended after
- * the loader's text.
- */
 static inline void plog_reset(void)
 {
-	for (uint32_t at = 0; at < PLOG_CAP; at += 64) {
-		*(volatile uint64_t *)(RAMOOPS_CONSOLE + at) = 0;
-	}
-	plog_at = 0;
+	PLOG_HDR->sig = RAMOOPS_SIG;
+	PLOG_HDR->start = 0;
+	PLOG_HDR->size = 0;
+	__asm__ volatile("dmb sy" ::: "memory");
 }
 
 static inline void plog_putc(char c)
 {
-	if (plog_at >= PLOG_CAP) {
-		return;
+	uint32_t at = PLOG_HDR->start, size = PLOG_HDR->size;
+
+	if (PLOG_HDR->sig != RAMOOPS_SIG || at >= PLOG_CAP || size > PLOG_CAP) {
+		plog_reset();
+		at = size = 0;
 	}
-	PLOG_DATA[plog_at++] = c;
+	PLOG_DATA[at] = c;
+	if (++at == PLOG_CAP) {
+		at = 0;
+	}
+	if (size < PLOG_CAP) {
+		size++;
+	}
+	PLOG_HDR->start = at;
+	PLOG_HDR->size = size;
 }
 
 /* ---- the loader's text ---- */

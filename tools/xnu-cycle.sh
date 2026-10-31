@@ -21,13 +21,20 @@ TEST_FLAGS=(-DXNU_WDT_SECONDS=0 -DXNU_CORES=$CORES -DXNU_WATCH_SECONDS=$WATCH
 	"-DXNU_RETURN_AFTER=\"$SECS\"" "-DXNU_EXTRA_ARGS=\"$XNU_ARGS epoch=$(date +%s)\"")
 "$ROOT/mtkloader/build.sh" "${TEST_FLAGS[@]}" "$@" >/dev/null
 # the payload (the XNU kernel and the small root) and the flashable image
-python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" >/dev/null
+COMMON=${HAKIOS_COMMON:-$(cd "$ROOT/.." && pwd)/refs/hakios-xnu-kernel}
+rm -rf "$ROOT/build-root"
+cp -a "$COMMON/userland/root" "$ROOT/build-root"
+ln -sf init "$ROOT/build-root/sbin/launchd"
+ln -sf private/var/tmp "$ROOT/build-root/tmp"
+python3 "$COMMON/tools/apfs/mkapfs.py" -z --plain fw -o "$ROOT/build-root.apfs" "redwood=$ROOT/build-root" >/dev/null
+rm -rf "$ROOT/build-root"
+python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" --ramdisk "$ROOT/build-root.apfs" >/dev/null
 python3 "$ROOT/tools/chainboot.py" "$ROOT/backup/boot_a.img" "$ROOT/mtkloader/mtkloader.bin" \
 	"$ROOT/xnu-flashed-slot_a.img" "$ROOT/build-payload.bin" >/dev/null
 [ "$(adb -s $S get-state 2>/dev/null)" = device ] && adb -s $S reboot bootloader
-for i in $(seq 1 120); do fastboot devices | grep -q $S && break; sleep 1; done
+for i in $(seq 1 120); do fastboot devices | rg -q "$S" && break; sleep 1; done
 # (fastboot -s waits for ever for a phone that is not there: a run would hang for hours)
-fastboot devices | grep -q $S || { echo "the phone did not come up in fastboot"; exit 1; }
+fastboot devices | rg -q "$S" || { echo "the phone did not come up in fastboot"; exit 1; }
 [ "$(fastboot -s $S getvar current-slot 2>&1 | sed -n 's/^current-slot: //p')" = a ] || { echo "current slot is not a"; exit 1; }
 fastboot -s $S flash boot_a "$ROOT/xnu-flashed-slot_a.img" >/dev/null 2>&1
 fastboot -s $S reboot >/dev/null 2>&1
@@ -35,6 +42,7 @@ echo "waiting for Android, to ask it for one XNU boot..."
 for i in $(seq 1 100); do [ "$(adb -s $S get-state 2>/dev/null)" = device ] && break; sleep 3; done
 sleep 4
 "$ROOT/tools/boot-xnu.sh"
+for i in $(seq 1 30); do [ "$(adb -s $S get-state 2>/dev/null)" != device ] && break; sleep 1; done
 echo "XNU is running; Android comes back by itself"
 WAIT_ITERS=$(( (SECS + 300) / 3 ))
 for i in $(seq 1 $WAIT_ITERS); do [ "$(adb -s $S get-state 2>/dev/null)" = device ] && break; sleep 3; done

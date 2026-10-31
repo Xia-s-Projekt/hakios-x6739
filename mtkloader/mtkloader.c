@@ -89,7 +89,7 @@ _Static_assert(XNU_CORES >= 1 && XNU_CORES <= 7, "one core at least, and one lef
  * (the A78s, the last the prime core), and the numbering skips 103, so the index in the tree is
  * not the MPIDR. The MPIDRs are in mt6893.h (core_mpidr), in this order.
  */
-#define WATCH_CORE          core_mpidr[XNU_CORES]
+#define WATCH_CORE          core_order[XNU_CORES]
 /*
  * The tree's own numbering of the cores, in the order the kernel is offered them: the loader's
  * own core first, then the prime core, then the other three A78s, then the A55s.
@@ -461,66 +461,95 @@ static uint32_t fb_pitch;
  * Until then the fallback is the reference board's, which is wrong for this panel, and the
  * loader says so in the log rather than drawing into it.
  */
+static uint64_t disp_ovl_base;
+
 static void display_find(void)
 {
-	uint32_t addr = rd32(OVL0_BASE + OVL_L0_ADDR);
-	uint32_t pitch = rd32(OVL0_BASE + OVL_L0_PITCH) & 0xffff;
+	static const uint64_t ovls[2] = { DISP_OVL0_BASE, DISP_OVL0_2L_BASE };
 
 	fb_base = 0;
 	fb_pitch = 0;
-	if (addr != 0 && pitch >= PANEL_W * 4 && pitch <= 8192) {
-		fb_base = addr;
-		fb_pitch = pitch;
-		out("framebuffer at ");
-		out_hex(addr);
-		out(" pitch ");
-		out_dec(pitch);
-		out("\n");
-	} else {
-		out("framebuffer: OVL0 L0_ADDR ");
-		out_hex(addr);
+	disp_ovl_base = 0;
+	for (int i = 0; i < 2; i++) {
+		uint32_t addr = rd32(ovls[i] + OVL_L0_ADDR);
+		uint32_t pitch = rd32(ovls[i] + OVL_L0_PITCH) & 0xffff;
+		if (addr != 0 && pitch >= PANEL_W * 4 && pitch <= 8192) {
+			fb_base = addr;
+			fb_pitch = pitch;
+			disp_ovl_base = ovls[i];
+			return;
+		}
+	}
+}
+
+static void display_report(void)
+{
+	static const uint64_t ovls[2] = { DISP_OVL0_BASE, DISP_OVL0_2L_BASE };
+	static const char *const names[2] = { "OVL0", "OVL0_2L" };
+
+	for (int i = 0; i < 2; i++) {
+		uint64_t b = ovls[i];
+		out(names[i]);
+		out(" @ ");
+		out_hex(b);
+		out(": EN ");
+		out_hex(rd32(b + 0x00c));
+		out(" ROI ");
+		out_hex(rd32(b + 0x020));
+		out(" SRC_CON ");
+		out_hex(rd32(b + OVL_SRC_CON));
+		out(" L0_CON ");
+		out_hex(rd32(b + OVL_L0_CON));
+		out(" L0_SIZE ");
+		out_hex(rd32(b + 0x038));
+		out(" +0x40 ");
+		out_hex(rd32(b + 0x040));
 		out(" L0_PITCH ");
-		out_hex(pitch);
-		out(" -- not a usable framebuffer for a ");
+		out_hex(rd32(b + OVL_L0_PITCH));
+		out(" L0_ADDR ");
+		out_hex(rd32(b + OVL_L0_ADDR));
+		out("\n");
+	}
+	if (fb_base) {
+		out("framebuffer at ");
+		out_hex(fb_base);
+		out(" pitch ");
+		out_dec(fb_pitch);
+		out(" (on ");
+		out_hex(disp_ovl_base);
+		out(")\n");
+	} else {
+		out("framebuffer: no usable OVL layer found for ");
 		out_dec(PANEL_W);
 		out("x");
 		out_dec(PANEL_H);
-		out(" panel; the screen is left as the preloader left it\n");
+		out("; screen left as preloader left it\n");
 	}
 }
 
 /* Opaque pixels only from here on: XNU's console writes alpha 0. */
 static void display_alpha_off(void)
 {
-	uint32_t con = rd32(OVL0_BASE + OVL_L0_CON);
+	if (!disp_ovl_base) {
+		return;
+	}
+	uint32_t con = rd32(disp_ovl_base + OVL_L0_CON);
 
-	wr32(OVL0_BASE + OVL_L0_CON, con & ~(1u << 8));
-	out("OVL0 L0_CON ");
+	wr32(disp_ovl_base + OVL_L0_CON, con & ~(1u << 8));
+	out("OVL L0_CON ");
 	out_hex(con);
 	out(" -> ");
-	out_hex(rd32(OVL0_BASE + OVL_L0_CON));
+	out_hex(rd32(disp_ovl_base + OVL_L0_CON));
 
-	/*
-	 * The reference board's preloader composes two layers: layer 0 is the picture, and layer 3
-	 * is its own overlay with the warning it prints on an unlocked phone ("Orange State: your
-	 * device has been unlocked"), from a buffer of its own. Nothing of iOS writes to that
-	 * buffer, so the words stayed on top of the home screen. Leave the overlay's layers out of
-	 * what the hardware composes.
-	 *
-	 * MT6893: the display engine is different (mt6893-disp, OVL0 at 0x14000000) and the tree
-	 * has a second layer block (disp_ovl1 at 0x14100000) and two merges. Whether the same
-	 * register means the same thing here has to be confirmed on the phone; until then this is
-	 * left as it is and only logged.
-	 */
-	uint32_t src = rd32(OVL0_BASE + OVL_SRC_CON);
+	uint32_t src = rd32(disp_ovl_base + OVL_SRC_CON);
 
-	wr32(OVL0_BASE + OVL_SRC_CON, src & 1u);
+	wr32(disp_ovl_base + OVL_SRC_CON, src & 1u);
 	wr32(DISP_MUTEX_EN, 1);
 	wr32(DISP_MUTEX_RUN, 1);
 	out(", SRC_CON ");
 	out_hex(src);
 	out(" -> ");
-	out_hex(rd32(OVL0_BASE + OVL_SRC_CON));
+	out_hex(rd32(disp_ovl_base + OVL_SRC_CON));
 	out("\n");
 }
 
@@ -1030,7 +1059,7 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 	dt_begin(&w, "gic");
 	dt_prop_str(&w, "device_type", "interrupt-controller");
 	dt_prop_str(&w, "compatible", "arm,gic-v3");
-	uint64_t gic_reg[4] = { 0x0c000000 - 0x0c000000, 0x10000, 0x0c040000 - 0x0c000000, 0x100000 };
+	uint64_t gic_reg[4] = { GIC_DIST_BASE - ARMIO_BASE, GIC_DIST_SIZE, GIC_CPU_BASE - ARMIO_BASE, GIC_CPU_SIZE };
 	dt_prop(&w, "reg", gic_reg, sizeof(gic_reg));
 	dt_end(&w);
 
@@ -1050,8 +1079,16 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 
 /* ---- leaving: Android, or a reset ---- */
 
+static void plog_flush(void)
+{
+	dcache_clean_range(RAMOOPS_CONSOLE, RAMOOPS_CONSOLE_SIZE);
+	dcache_clean_range(RAMOOPS_PMSG, RAMOOPS_PMSG_SIZE);
+	dcache_clean_range(MARKER_PA, 192);
+}
+
 static void __attribute__((noreturn)) reset_board(void)
 {
+	plog_flush();
 	psci_system_reset();
 	wdt_reset();
 }
@@ -1076,6 +1113,7 @@ static void __attribute__((noreturn)) chain_android(void)
 	touch_hand_back();
 #endif
 	out("starting Android\n");
+	plog_flush();
 
 	volatile uint32_t *dst = (volatile uint32_t *)CHAIN_STUB_PA;
 	const volatile uint32_t *src = (const volatile uint32_t *)chain_stub;
@@ -1112,10 +1150,7 @@ struct span {
 };
 
 /* Append spans (in order) to the ramoops console: all of it if it fits, else its start and
- * as much of its end as there is room for.
- *
- * MT6893: the console zone holds plain text with no header of ours (see mtkdbg.h), so the room
- * left is what is behind the loader's own text. */
+ * as much of its end as there is room for. */
 static void save_log(const struct span *sp, int nsp)
 {
 	uint64_t total = 0, room, head, tail, skip_to, at = 0;
@@ -1123,7 +1158,7 @@ static void save_log(const struct span *sp, int nsp)
 	for (int i = 0; i < nsp; i++) {
 		total += sp[i].n;
 	}
-	room = PLOG_CAP > plog_at ? PLOG_CAP - plog_at : 0;
+	room = PLOG_CAP > PLOG_HDR->size ? PLOG_CAP - PLOG_HDR->size : 0;
 	room = room > 1024 ? room - 1024 : 0;
 	head = total <= room ? total : room / 4;
 	tail = total <= room ? 0 : room - head;
@@ -1147,14 +1182,10 @@ static void save_log(const struct span *sp, int nsp)
 	fbc.base = fb;
 }
 
-/* The last lines of what is in ramoops, on the lower part of the screen.
- *
- * MT6893: the zone holds plain text with no header of ours, so what is there is simply what
- * the loader wrote -- and the loader's own text is at the front of it, the XNU log after that.
- */
+/* The last lines of what is in ramoops, on the lower part of the screen. */
 static void show_log_tail(uint32_t lines)
 {
-	uint32_t size = plog_at, n = 0;
+	uint32_t size = PLOG_HDR->size, n = 0;
 	uint32_t top = PANEL_H - (lines + 1) * 16;
 	uint64_t i;
 
@@ -1526,7 +1557,7 @@ void xnu_returned(uint64_t log_pa, uint64_t len, uint64_t reason, uint64_t code,
 	save_log(&sp, 1);
 	dbg_puts("=== end of XNU log ===\n");
 	show_log_tail(40);
-	dbg_delay_ms(20000);
+	dbg_delay_ms(2000);
 	reset_board();
 }
 
@@ -1776,12 +1807,6 @@ static void timer_probe(void)
 static uint64_t watcher_l1[512] __attribute__((aligned(4096)));
 static volatile uint64_t watcher_started __attribute__((aligned(64)));
 
-static void plog_flush(void)
-{
-	dcache_clean_range(RAMOOPS_CONSOLE, RAMOOPS_CONSOLE_SIZE);
-	dcache_clean_range(MARKER_PA, 192);
-}
-
 /*
  * XNU never came back (no timer, a hang): with its caches visible through our own cacheable
  * mapping, take what it shows and has written, put it into ramoops and reset the board.
@@ -1819,6 +1844,7 @@ void watcher_main(void)
 		}
 	}
 
+	wdt_disable();
 	fbc.base = 0; /* the screen is XNU's: read it, do not draw on it */
 	marker_set(MARK_DONE);
 	dbg_puts("\n=== watcher: XNU still running after " );
@@ -1838,45 +1864,7 @@ void watcher_main(void)
 		dbg_puts(" loader_log_len ");
 		dbg_dec(rd32(kva_to_pa(xsyms.log_len)));
 	}
-	/* Where the first core is: find its PMU in the cpu_dbgapb window, sample PMPCSR. */
-	{
-		const uint64_t win = 0x0e010000ULL; /* cpu_dbgapb, core 0 */
-		uint64_t fb_saved = fbc.base, pmu = 0;
-		out("\ncpu_dbgapb components:");
-		for (uint64_t off = 0; off < 0x100000; off += 0x10000) {
-			uint64_t b = win + off;
-			uint32_t cidr1 = rd32(b + 0xff4), devarch = rd32(b + 0xfbc), devtype = rd32(b + 0xfcc);
-			out("\n  +");
-			out_hex(off);
-			out(" CIDR1 ");
-			out_hex(cidr1);
-			out(" DEVARCH ");
-			out_hex(devarch);
-			out(" DEVTYPE ");
-			out_hex(devtype);
-			if ((devarch & 0xffff) == 0x2a16) { /* ARM PMU v3 */
-				pmu = b;
-			}
-		}
-		out("\n");
-		if (pmu) {
-			wr32(pmu + 0xfb0, 0xc5acce55u);
-			out("cpu0 PC samples (PMPCSR):\n");
-			for (int i = 0; i < 24; i++) {
-				uint32_t lo = rd32(pmu + 0x200);
-				uint32_t hi = rd32(pmu + 0x204);
-				uint64_t pc = ((uint64_t)hi << 32 | lo) & 0x00ffffffffffffffULL;
-				if (pc >> 47) {
-					pc |= 0xff00000000000000ULL;
-				}
-				out("  ");
-				out_sym(pc);
-				out("\n");
-				dbg_delay_ms(15);
-			}
-		}
-		fbc.base = fb_saved;
-	}
+	dbg_puts("\n");
 	/*
 	 * Is the virtual timer's PPI 27 even reaching the first core? GICR frame 0 is its
 	 * redistributor (SGI/PPI page at +0x10000); pending but not active means the GIC latched
@@ -2388,17 +2376,15 @@ static void __attribute__((noreturn)) run_xnu(void)
 	out("\n");
 	display_alpha_off();
 
+	marker_set(MARK_RUNNING);
 	if (XNU_WDT_SECONDS) {
 		uint32_t t = XNU_WDT_SECONDS > 31 ? 31 : XNU_WDT_SECONDS;
-		marker_set(MARK_RUNNING);
 		wr32(TOPRGU_LENGTH, ((t * 32768u / 512u) << 5) | 0x8u);
 		wr32(TOPRGU_RESTART, TOPRGU_RESTART_KEY);
 		wr32(TOPRGU_MODE, TOPRGU_MODE_KEY | 0x1u);
 		out("watchdog: back to Android in ");
 		out_dec(t);
 		out(" s\n");
-	} else {
-		marker_set(0);
 	}
 	/* The timers XNU will use: a virtual counter offset by EL2 (MediaTek's GenieZone) would
 	 * leave its deadlines forever in the future, and the kernel idle with nothing to wake it. */
@@ -2453,12 +2439,15 @@ static void __attribute__((noreturn)) run_xnu(void)
 	 * reach, what LK wrote there stays -- its "Orange State: your device has been unlocked"
 	 * showed through the home screen.
 	 */
-	fb_rect(0, 0, PANEL_W, PANEL_H, 0xff000000u);
-	for (uint64_t at = fb_base; at < fb_base + (uint64_t)PANEL_H * fb_pitch; at += 64) {
-		__asm__ volatile("dc cvac, %0" : : "r"(at));
+	if (fb_base) {
+		fb_rect(0, 0, PANEL_W, PANEL_H, 0xff000000u);
+		for (uint64_t at = fb_base; at < fb_base + (uint64_t)PANEL_H * fb_pitch; at += 64) {
+			__asm__ volatile("dc cvac, %0" : : "r"(at));
+		}
+		__asm__ volatile("dsb sy");
 	}
-	__asm__ volatile("dsb sy");
 	out("Jumping to XNU...\n");
+	plog_flush();
 	jump_to_kernel(kva_to_pa(entry_va), ba_pa);
 	__builtin_unreachable();
 }
@@ -3051,10 +3040,14 @@ static const char boot_xnu_flag[] = "DARWIN-X6739:BOOT-XNU";
  */
 static int pmsg_take(const char *flag, uint32_t n)
 {
-	volatile char *d = (volatile char *)RAMOOPS_PMSG;
-	uint32_t cap = RAMOOPS_PMSG_SIZE;
+	volatile struct ramoops_hdr *h = (volatile struct ramoops_hdr *)RAMOOPS_PMSG;
+	volatile char *d = (volatile char *)(RAMOOPS_PMSG + sizeof(struct ramoops_hdr));
+	uint32_t cap = RAMOOPS_PMSG_SIZE - sizeof(struct ramoops_hdr);
 	int found = 0;
 
+	if (h->sig != RAMOOPS_SIG) {
+		return 0;
+	}
 	for (uint32_t at = 0; at + n <= cap; at++) {
 		uint32_t k = 0;
 
@@ -3079,11 +3072,10 @@ static int xnu_requested(void)
 static int boot_choice(void)
 {
 	int xnu = MENU_DEFAULT_XNU || xnu_requested();
-	uint64_t screen = fbc.base;
 
-	fbc.base = 0;
-	dbg_puts(xnu ? "boot: Darwin / XNU (requested)\n" : "boot: Android\n");
-	fbc.base = screen;
+	if (!fbc.base) {
+		return xnu;
+	}
 	fb_rect(0, 600, PANEL_W, 160, 0xff000000u);
 	fbc.scale = 3;
 	fbc.x = 48;
@@ -3438,25 +3430,27 @@ rails_off:
 
 void mtkloader_main(uint64_t dtb)
 {
-	uint32_t mark = marker_get();
-
 	wdt_disable();
 	lk_dtb = dtb;
-	display_find();
-	fbcon_init(fb_base, fb_pitch, 0, 1);
+	dcache_clean_range(MARKER_PA, 192);
+	dcache_clean_range(RAMOOPS_PMSG, RAMOOPS_PMSG_SIZE);
+	uint32_t mark = marker_get();
 
 	if (mark == MARK_DONE) {
 		/* XNU's log was saved when it came back; leave ramoops as it is. */
 		chain_android();
 	}
+	display_find();
+	fbcon_init(fb_base, fb_pitch, 0, 1);
+
 	if (mark == MARK_RUNNING) {
 		rescue_log();
 		dbg_delay_ms(5000);
 		chain_android();
 	}
 
-	plog_reset();
 #if TOUCH_PROBE
+	plog_reset();
 	fb_rect(0, 0, PANEL_W, PANEL_H, 0xff000000u);
 	fbc.x = 0;
 	fbc.y = fbc.top = 0;
@@ -3467,6 +3461,7 @@ void mtkloader_main(uint64_t dtb)
 #endif
 #if GPU_PROBE
 	if (pmsg_take(gpu_probe_flag, sizeof(gpu_probe_flag) - 1)) {
+		plog_reset();
 		fb_rect(0, 0, PANEL_W, PANEL_H, 0xff000000u);
 		fbc.x = 0;
 		fbc.y = fbc.top = 0;
@@ -3477,6 +3472,7 @@ void mtkloader_main(uint64_t dtb)
 	chain_android();
 #endif
 #if MSDC_TEST
+	plog_reset();
 	fb_rect(0, 0, PANEL_W, PANEL_H, 0xff000000u);
 	fbc.x = 0;
 	fbc.y = fbc.top = 0;
@@ -3489,15 +3485,17 @@ void mtkloader_main(uint64_t dtb)
 	if (!boot_choice()) {
 		chain_android();
 	}
+	plog_reset();
 	fb_rect(0, 0, PANEL_W, PANEL_H, 0xff000000u);
 	fbc.x = 0;
 	fbc.y = fbc.top = 0;
 	fbc.fg = 0xff40ff40u;
-	out("== mtkloader: Darwin/XNU on X6826B (MT6768) ==\n");
+	out("== mtkloader: Darwin/XNU on X6739 (MT6893) ==\n");
 	fbc.fg = 0xffffffffu;
 	out("LK dtb ");
 	out_hex(dtb);
 	out("\n");
+	display_report();
 	connsys_dt_report(dtb);         /* Wi-Fi step 1: what Android's tree says of CONNSYS (mtkconnsys.h) */
 	run_xnu();
 }

@@ -32,9 +32,15 @@
 #define DRAM_BASE           0x40000000ULL
 #define DRAM_SIZE           0x200000000ULL
 
-/* XNU's window: one contiguous range, high in DRAM, clear of the phone's own work. */
+/*
+ * XNU's window: one contiguous range, clear of the phone's own reservations.
+ *
+ * From /reserved-memory in the phone's device tree and /proc/iomem:
+ *   0xc0000000 - 0xdfffffff (512 MiB) is unreserved System RAM.
+ *   0xe0000000 - 0xebeaffff holds mblock-25/26/27-md_mem_usage (modem EMI-MPU regions).
+ */
 #define XNU_PHYS_BASE       0xC0000000ULL
-#define XNU_MEM_SIZE        0x2E000000ULL       /* to 0xee000000; NOT yet confirmed on the phone */
+#define XNU_MEM_SIZE        0x20000000ULL       /* 512 MiB: 0xc0000000..0xdfffffff, clear of md_mem_usage at 0xe0000000 */
 
 /* Where the system image is put, clear of the kernel, as xnuloader does it (RESIDENT_RD_OFFSET). */
 #define SYSTEM_PA           (XNU_PHYS_BASE + 0x08000000ULL)
@@ -163,9 +169,14 @@ static const uint32_t core_mpidr[CPU_COUNT] = {
  */
 #define DISPSYS_BASE        0x14116000ULL
 #define DISP_OVL0_BASE      0x14000000ULL
+#define DISP_OVL0_2L_BASE   0x14001000ULL
 #define DISP_OVL1_BASE      0x14100000ULL
 #define DSI0_BASE           0x1400e000ULL
 #define DSI1_BASE           0x1410e000ULL
+
+/* LK's framebuffer from /reserved-memory/mblock-20-framebuffer and /chosen/atag,videolfb. */
+#define LK_FB_BASE          0x76a10000ULL
+#define LK_FB_SIZE          0x01df0000ULL
 
 /*
  * The registers inside the OVL block and the display mutex.

@@ -14,10 +14,12 @@ reference for the *numbers* is this phone's own device tree.
 - the tools that read a device tree without `dtc` are in `tools/`;
 - the loader's platform constants are in `mtkloader/mt6893.h`, each with where its number came
   from;
-- **the loader itself is forked and adapted**: `mtkloader/mtkloader.c` is the reference port's
-  loader with this board's platform (the memory map, the core order, the GIC-v3 layout, the
-  display, the storage decision, the big cores' clock, the touch path);
-- the run tools (`tools/xnu-cycle.sh`, `boot-xnu.sh`, `chainboot.py`, `gpt-carve.py`, …) and
+- **the loader itself is forked, adapted, and proven on hardware**: `mtkloader/mtkloader.c` builds,
+  chains to XNU, and hands control back to Android cleanly;
+- **the first boot with nothing of the phone's succeeded**: XNU booted to userland, ran Process 1
+  (`/sbin/launchd -> /sbin/init`), passed all 35 userland checks with 0 failures, verified the
+  framebuffer console display, and returned to Android with full pstore logging;
+- the run tools (`tools/xnu-test.sh`, `tools/xnu-cycle.sh`, `boot-xnu.sh`, `chainboot.py`, `gpt-carve.py`, …) and
   `pull-firmware.sh`.
 
 ### What the forked loader already does, and what is still the reference board's
