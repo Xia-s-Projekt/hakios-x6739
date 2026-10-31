@@ -15,6 +15,11 @@ logs/
 # the XNU payload and the system image
 *.packfs
 xnusys*
+# the payload and the flashable boot image the run builds
+build-payload.bin
+xnu-flashed-slot_a.img
+# the phone's own boot image, pulled off the phone (backup/): the vendor's
+backup/
 # the XNU identity, made from the user's own IPSW (identity.h)
 xnuloader/identity.h
 # the iOS firmware out of Apple's archive (tools/fetch-ios.sh): never in the repository
