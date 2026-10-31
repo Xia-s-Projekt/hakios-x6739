@@ -18,12 +18,12 @@ import struct
 import sys
 import uuid
 
-SECTOR = 512
+SECTOR = 4096
 SHRINK = "userdata"
 NEW_NAME = "xnusys"
-NEW_SECTORS = 8 * 1024 * 1024          # 4 GiB
+NEW_SECTORS = (4 * 1024 * 1024 * 1024) // SECTOR   # 4 GiB (1048576 sectors)
 NEW_TYPE = uuid.UUID("0fc63daf-8483-4772-8e79-3d69d8477de4")   # Linux filesystem data
-ALIGN = 2048                            # 1 MiB
+ALIGN = (1024 * 1024) // SECTOR                   # 1 MiB (256 sectors)
 
 
 def crc32(b):
