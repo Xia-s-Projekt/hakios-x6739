@@ -21,6 +21,8 @@ COMMON=${HAKIOS_COMMON:-$WORKSPACE/refs/hakios-xnu-kernel}
 OUT=${XNU_LOG_OUT:-$ROOT/logs/xnu-last.log}
 IMG=${XNU_IMAGE:-$ROOT/xnu-flashed-slot_a.img}
 BOOT=${XNU_BOOT_IMAGE:-$ROOT/backup/boot_a.img}
+KERNEL=${XNU_KERNEL:-$ROOT/mach.development.mt6893}
+[ -f "$KERNEL" ] || KERNEL="$COMMON/prebuilt/mach.development.bcm2837"
 
 # how long the kernel runs before it hands the log back
 SECS=${XNU_SECS:-45}
@@ -49,11 +51,26 @@ echo "== making the payload =="
 rm -rf "$ROOT/build-root"
 cp -a "$COMMON/userland/root" "$ROOT/build-root"
 ln -sf init "$ROOT/build-root/sbin/launchd"
+ln -sf init "$ROOT/build-root/sbin/launchd.ios"
 ln -sf private/var/tmp "$ROOT/build-root/tmp"
+mkdir -p "$ROOT/build-root/flash" "$ROOT/build-root/Cryptexes/OS" "$ROOT/build-root/Cryptexes/App"
+ln -sf . "$ROOT/build-root/redwood"
+python3 -c "
+import struct
+p = '$ROOT/build-root/sbin/init'
+b = bytearray(open(p, 'rb').read())
+assert struct.unpack('<Q', b[0x8000:0x8008])[0] == 0x100005d92
+struct.pack_into('<Q', b, 0x8000, 0x100005d17)
+assert b[0x5a0:0x5a4] == bytes.fromhex('a0000035')
+b[0x5a0:0x5a4] = bytes.fromhex('1f2003d5')
+assert b[0x36c8:0x36cc] == bytes.fromhex('a1050054')
+b[0x36c8:0x36cc] = bytes.fromhex('2d000014')
+open(p, 'wb').write(b)
+"
 python3 "$COMMON/tools/apfs/mkapfs.py" -z --plain fw -o "$ROOT/build-root.apfs" "redwood=$ROOT/build-root" >/dev/null
 rm -rf "$ROOT/build-root"
 python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" \
-	--kernel "$COMMON/prebuilt/mach.development.bcm2837" \
+	--kernel "$KERNEL" \
 	--ramdisk "$ROOT/build-root.apfs" \
 	--cmdline="rd=md0 ufs_root=1 $XNU_ARGS"
 
@@ -90,6 +107,7 @@ sleep 3
 echo "== taking the log out =="
 rm -rf "$ROOT/logs/pstore"
 mkdir -p "$ROOT/logs/pstore"
+adb -s $S shell 'su -c "ls -la /sys/fs/pstore"' || true
 for i in $(seq 1 10); do
 	adb -s $S shell 'su -c "cat /sys/fs/pstore/console-ramoops-0"' > "$ROOT/logs/pstore/console-ramoops-0" 2>/dev/null || true
 	[ -s "$ROOT/logs/pstore/console-ramoops-0" ] && break
@@ -98,5 +116,6 @@ for i in $(seq 1 10); do
 	sleep 2
 done
 adb -s $S shell 'su -c "cat /sys/fs/pstore/pmsg-ramoops-0"' > "$ROOT/logs/pstore/pmsg-ramoops-0" 2>/dev/null || true
+adb -s $S shell 'su -c "cat /sys/fs/pstore/dmesg-ramoops-0"' > "$ROOT/logs/pstore/dmesg-ramoops-0" 2>/dev/null || true
 cp -f "$ROOT/logs/pstore/console-ramoops-0" "$OUT" 2>/dev/null || true
 echo "log: $OUT ($(wc -c < "$OUT") bytes)"
