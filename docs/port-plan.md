@@ -110,7 +110,10 @@ tree or anywhere else in the project.
 - `mtkloader/mtkloader.c` — the main flow, the device tree the kernel gets, the run (done, to be
   completed).
 - `mtkloader/mtkdbg.h` — the console and the ramoops output (done for this board's layout).
-- `mtkloader/link.ld`, `mtkloader/build.sh` — the build (done).
+- `mtkloader/link.ld`, `mtkloader/build.sh` — the build (done). The build makes the console's
+  8x16 font from a system font (`tools/mkfont8x16.c`, FreeType) and takes the loader's identity
+  from the iPhone X's device tree (`tools/fetch-ios.sh identity`). The loader compiles and links
+  to `mtkloader/mtkloader.bin`.
 
 ## 2. The kernel's UFS driver
 

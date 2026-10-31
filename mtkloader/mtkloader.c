@@ -39,7 +39,9 @@
 #include "msdc.h"
 #include "mtkspi.h"
 #include "tcm.h"
-#include "../xnuloader/identity.h"
+/* the loader's identity, made from the iPhone X's device tree (xnuloader/mkidentity.sh). The
+ * common tree keeps it; the build adds that directory to the include path (see build.sh). */
+#include "identity.h"
 
 /* XNU's view of memory: one contiguous range that nothing else (LK, Android, TEE, ATF, the
  * framebuffer) uses. MT6893: the DRAM starts at 0x40000000 and is 8 GiB; the window is placed
@@ -85,9 +87,23 @@ _Static_assert(XNU_CORES >= 1 && XNU_CORES <= 7, "one core at least, and one lef
  *
  * MT6893: the tree numbers the cores cpu@000-cpu@003 (the A55s), cpu@100-cpu@102 and cpu@200
  * (the A78s, the last the prime core), and the numbering skips 103, so the index in the tree is
- * not the MPIDR. The MPIDRs are in mt6893.h (core_mpidr).
+ * not the MPIDR. The MPIDRs are in mt6893.h (core_mpidr), in this order.
  */
 #define WATCH_CORE          core_mpidr[XNU_CORES]
+/*
+ * The tree's own numbering of the cores, in the order the kernel is offered them: the loader's
+ * own core first, then the prime core, then the other three A78s, then the A55s.
+ *
+ * These are the tree's reg values divided by 0x100 -- the tree gives the A55s reg 0x000-0x300
+ * and the A78s reg 0x400-0x700 (cpu@200 is the prime core, reg 0x700), and the loader writes
+ * reg = value << 8 into the tree it builds. The MPIDR of a core is its reg shifted left by
+ * eight, so the same numbers are in mt6893.h (core_mpidr).
+ */
+static const uint8_t core_order[CPU_COUNT] = {
+	0,                                  /* the little one the loader runs on */
+	7, 6, 5, 4,                         /* the A78s, the prime core first */
+	3, 2, 1,                            /* the rest of the A55s */
+};
 /* Checkpoint for XNU to return at (osfmk/arm/arm_init.c LOADER_CHECKPOINT), 0 = none. */
 #ifndef XNU_CHECKPOINT
 #define XNU_CHECKPOINT      0
@@ -980,7 +996,7 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 		dt_prop_u64(&w, "bus-frequency", 100000000ULL);
 		dt_prop_u64(&w, "memory-frequency", 100000000ULL);
 		dt_prop_u64(&w, "peripheral-frequency", 24000000ULL);
-		if (core < 6) { /* cores 0-5 are the Cortex-A55s, 6 and 7 the A75s */
+		if (core < SMALL_CORE_COUNT) { /* the four Cortex-A55s; the rest are the A78s */
 			dt_prop_u32(&w, "small-core", 1);
 		}
 		dt_end(&w);
