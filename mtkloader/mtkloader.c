@@ -173,7 +173,7 @@ static const uint8_t core_order[CPU_COUNT] = {
 #define XNU_SMALL_ROOT      1
 #endif
 #if XNU_ROOT_STORAGE
-#define XNU_ROOT_ARG        "rd=md0 ufs_root=1"     /* (rd=md0 for libignition's "ramdisk" boot) */
+#define XNU_ROOT_ARG        "rd=md0 ufs_root=1 ufs_shared_pa=0x80200000 ufs_native=1 root_apfs=ufs_xnusys"     /* (rd=md0 for libignition's "ramdisk" boot) */
 #else
 #define XNU_ROOT_ARG        "rd=md0"
 #endif
@@ -569,6 +569,143 @@ static void ufs_probe(void)
 	out("\n");
 	out("  UTMRLBA: "); out_hex(utmrlbau); out(":"); out_hex(utmrlba);
 	out("  RSR:     "); out_hex(utmrlrsr);
+	out("\n");
+
+	if (utrlba != 0) {
+		volatile uint32_t *slot0 = (volatile uint32_t *)(uintptr_t)utrlba;
+		out("  Slot 0 UTRD:\n    ");
+		out_hex(slot0[0]); out(" ");
+		out_hex(slot0[1]); out(" ");
+		out_hex(slot0[2]); out(" ");
+		out_hex(slot0[3]); out("\n");
+		out("    UCD: "); out_hex(slot0[5]); out(":"); out_hex(slot0[4]);
+		out(" RESP: "); out_hex(slot0[6]);
+		out(" PRDT: "); out_hex(slot0[7]);
+		out("\n");
+	}
+}
+
+#define BLOCK_MAGIC        0x4b434f4c42574452ULL       /* "RDWBLOCK" */
+#define BLOCK_VERSION      3
+#define BLOCK_MAX_PARTS    160
+#define BLOCK_PART_UNIT    1u
+
+struct loader_block_part {
+	char name[36];
+	uint32_t block_size;
+	uint64_t blocks;
+	uint64_t start_lba;
+	uint16_t unit;
+	uint8_t lun;
+	uint8_t flags;
+	uint32_t reserved;
+};
+
+struct loader_block {
+	uint64_t magic;
+	uint32_t version, size;
+	uint32_t parts, buffer_size;
+	uint64_t buffer_pa;
+	uint32_t write_part_plus_one;
+	uint32_t write_reserved;
+	uint64_t write_first;
+	struct {
+		volatile uint32_t request;
+		uint32_t part;
+		uint64_t lba, count;
+		uint32_t op;
+		uint32_t reserved;
+	} ask __attribute__((aligned(128)));
+	struct {
+		volatile uint32_t answered;
+		uint32_t reserved;
+		int64_t status;
+		uint64_t served, failed, bytes, ticks;
+	} answer __attribute__((aligned(128)));
+	struct loader_block_part part[BLOCK_MAX_PARTS] __attribute__((aligned(128)));
+	struct {
+		uint64_t hc_pa;
+		uint64_t area_pa;
+		uint32_t area_size, ucd_offset, ucd_size, slots;
+		uint32_t uefi_utrlba, uefi_utrlbau;
+	} native __attribute__((aligned(128)));
+	struct {
+		volatile uint32_t take_back;
+	} loader_native __attribute__((aligned(128)));
+	struct {
+		volatile uint32_t list_in;
+		uint32_t switched_in, switched_out;
+		volatile uint32_t cnr_at_switch;
+	} kernel_native __attribute__((aligned(128)));
+};
+
+_Static_assert(__builtin_offsetof(struct loader_block, ask) == 128, "ask offset");
+_Static_assert(__builtin_offsetof(struct loader_block, answer) == 256, "answer offset");
+_Static_assert(__builtin_offsetof(struct loader_block, part) == 384, "part offset");
+_Static_assert(__builtin_offsetof(struct loader_block, native) == 10624, "native offset");
+
+static void ufs_setup_shared(void)
+{
+	volatile struct loader_block *lb = (volatile struct loader_block *)(uintptr_t)UFS_SHARED_BLOCK_PA;
+	memset((void *)lb, 0, sizeof(*lb));
+	memset((void *)(uintptr_t)UFS_HC_AREA_PA, 0, UFS_HC_AREA_SIZE);
+	memset((void *)(uintptr_t)UFS_DATA_BUFFER_PA, 0, UFS_DATA_BUFFER_SIZE);
+
+	lb->magic = BLOCK_MAGIC;
+	lb->version = BLOCK_VERSION;
+	lb->size = sizeof(struct loader_block);
+	lb->buffer_size = UFS_DATA_BUFFER_SIZE;
+	lb->buffer_pa = UFS_DATA_BUFFER_PA;
+
+	uint32_t utrlba = rd32(UFSHCI_BASE + 0x50);
+	uint32_t utrlbau = rd32(UFSHCI_BASE + 0x54);
+
+	lb->native.hc_pa = UFSHCI_BASE;
+	lb->native.area_pa = UFS_HC_AREA_PA;
+	lb->native.area_size = UFS_HC_AREA_SIZE;
+	lb->native.ucd_offset = 0x1000u;
+	lb->native.ucd_size = 0x800u;
+	lb->native.slots = 32u;
+	lb->native.uefi_utrlba = utrlba;
+	lb->native.uefi_utrlbau = utrlbau;
+
+	/* Part 0: xnusys (iOS root APFS container) */
+	memcpy((void *)lb->part[0].name, "xnusys", 7);
+	lb->part[0].block_size = 4096;
+	lb->part[0].start_lba = 61427456ULL;
+	lb->part[0].blocks = 1048827ULL;
+	lb->part[0].unit = 2;
+	lb->part[0].lun = 2;
+	lb->part[0].flags = 0;
+
+	/* Part 1: userdata (carved) */
+	memcpy((void *)lb->part[1].name, "userdata", 9);
+	lb->part[1].block_size = 4096;
+	lb->part[1].start_lba = 3223552ULL;
+	lb->part[1].blocks = 58203904ULL;
+	lb->part[1].unit = 2;
+	lb->part[1].lun = 2;
+	lb->part[1].flags = 0;
+
+	/* Part 2: unit2 (whole LUN 2) */
+	memcpy((void *)lb->part[2].name, "unit2", 6);
+	lb->part[2].block_size = 4096;
+	lb->part[2].start_lba = 0ULL;
+	lb->part[2].blocks = 62480384ULL;
+	lb->part[2].unit = 2;
+	lb->part[2].lun = 2;
+	lb->part[2].flags = BLOCK_PART_UNIT;
+
+	lb->parts = 3;
+
+	dcache_clean_range(UFS_SHARED_BLOCK_PA, sizeof(struct loader_block));
+	dcache_clean_range(UFS_HC_AREA_PA, UFS_HC_AREA_SIZE);
+	dcache_clean_range(UFS_DATA_BUFFER_PA, UFS_DATA_BUFFER_SIZE);
+
+	out("ufs: shared block at ");
+	out_hex(UFS_SHARED_BLOCK_PA);
+	out(", 3 parts, native area ");
+	out_hex(UFS_HC_AREA_PA);
 	out("\n");
 }
 
@@ -3545,6 +3682,7 @@ void mtkloader_main(uint64_t dtb)
 	out("\n");
 	display_report();
 	ufs_probe();
+	ufs_setup_shared();
 	connsys_dt_report(dtb);         /* Wi-Fi step 1: what Android's tree says of CONNSYS (mtkconnsys.h) */
 	run_xnu();
 }

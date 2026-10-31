@@ -147,6 +147,13 @@ static const uint32_t core_mpidr[CPU_COUNT] = {
 #define UFSHCI_BASE         0x11270000ULL
 #define UFSHCI_SIZE         0x2300ULL
 
+/* DRAM handover buffers for XNU native UFS driver */
+#define UFS_SHARED_BLOCK_PA 0x80200000ULL
+#define UFS_HC_AREA_PA      0x80210000ULL
+#define UFS_HC_AREA_SIZE    0x11000u
+#define UFS_DATA_BUFFER_PA  0x80230000ULL
+#define UFS_DATA_BUFFER_SIZE (64u * 1024u)
+
 /* ---- the display ---- */
 
 /*
