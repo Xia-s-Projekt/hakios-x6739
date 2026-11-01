@@ -101,26 +101,38 @@ elif [ -n "$CPUS" ] || [ -n "$SECS" ] || [ -n "$ARGS" ]; then
 fi
 
 if [ "$REBUILD" -eq 1 ]; then
-	echo "Rebuilding HakiOS payload and loader..."
+	echo "Building HakiOS image..."
 	[ -n "$CPUS" ] && echo "  CPUs: $CPUS"
 	[ -n "$SECS" ] && echo "  Duration: ${SECS}s"
 	[ -n "$ARGS" ] && echo "  XNU Args: $ARGS"
 
-	export HAKIOS_SERIAL="$SERIAL"
-	[ -n "$SECS" ] && export XNU_SECS="$SECS"
-	[ -n "$CPUS" ] && export XNU_CORES="$CPUS"
-	[ -n "$ARGS" ] && export XNU_ARGS="$ARGS"
+	# Build mtkloader
+	WATCH=$(( (SECS > 0 ? SECS : 120) + 240 ))
+	"$ROOT/mtkloader/build.sh" -DXNU_WDT_SECONDS=0 -DXNU_CORES="${CPUS:-4}" \
+		-DXNU_WATCH_SECONDS="$WATCH" "-DXNU_RETURN_AFTER=\"${SECS:-120}\"" \
+		"-DXNU_EXTRA_ARGS=\"${ARGS:-cpus=4 fb_diff=1} epoch=$(date +%s)\"" \
+		-DXNU_SMALL_ROOT=1 >/dev/null
 
-	XNU_NO_FLASH=1 "$ROOT/tools/xnu-test.sh"
+	# Build payload if missing or when args/cmdline change
+	python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" \
+		--kernel "${XNU_KERNEL:-$ROOT/mach.development.mt6893}" \
+		--ramdisk "$ROOT/build-root.apfs" \
+		--cmdline="rd=md0 ufs_root=1 ${ARGS:-cpus=4 fb_diff=1}" >/dev/null
 
-	echo "Rebooting to bootloader to flash boot_a..."
+	# Pack boot image directly
+	python3 "$ROOT/tools/chainboot.py" "$ROOT/backup/boot_a.img" "$ROOT/mtkloader/mtkloader.bin" "$IMG" "$ROOT/build-payload.bin" >/dev/null
+
+	echo "Arming one-shot HakiOS boot flag..."
+	adb -s "$SERIAL" shell 'su -c "printf DARWIN-X6739:BOOT-XNU > /dev/pmsg0"'
+
+	echo "Flashing boot_a and booting HakiOS directly..."
 	adb -s "$SERIAL" reboot bootloader
 	for i in $(seq 1 120); do fastboot devices | rg -q "$SERIAL" && break; sleep 1; done
+	fastboot devices | rg -q "$SERIAL" || { echo "Device did not enter fastboot"; exit 1; }
 	fastboot -s "$SERIAL" flash boot_a "$IMG"
 	fastboot -s "$SERIAL" reboot
-	echo "Waiting for Android to come back up..."
-	for i in $(seq 1 100); do [ "$(adb -s "$SERIAL" get-state 2>/dev/null)" = device ] && break; sleep 3; done
-	sleep 4
+	echo "Device rebooted directly into HakiOS."
+	exit 0
 fi
 
 echo "Arming one-shot HakiOS boot flag..."
