@@ -24,7 +24,7 @@ pstore. What does not carry over:
 | interrupt controller | GIC v2 | **GIC-v3** |
 | GPU | Mali-G52 MC2 | Mali-G77 MC9 (`valhall`) |
 | display | LK's framebuffer, 720×1640 | `mt6893-disp` pipeline, 1080×2400, DSI0+DSI1, a Tianma NT37705 panel |
-| touch | OmniVision TD4160 over SPI2 | **FocalTech**, and the tree's `/touch` is a GPIO interrupt |
+| touch | OmniVision TD4160 over SPI2 | **FocalTech FT3681 over I2C0** (`0x11015000`, slave `0x38`; SCL0=GPIO 204, SDA0=GPIO 205, reset=GPIO 20, IRQ=GPIO 21) |
 | CONNSYS firmware | the soc1_0 generation | the **soc3_0** generation |
 | boot partition | 32 MiB | 64 MiB |
 | ramoops | console `0x4d09f000`, pmsg `0x4d0e0000` | console `0x480ef000`, pmsg `0x48130000` |
@@ -39,7 +39,7 @@ all of it read out of the phone's own device tree and its own kernel command lin
 | `mtkloader/` | the bare-metal loader: MMU off, the SoC's bring-up, XNU's device tree, the boot arguments |
 | `kernel/` | this phone's drivers in XNU, as paths of the kernel tree (`kernel/README.md`) |
 | `tools/` | one run (`xnu-cycle.sh`), flashing, probes, log readers, the device-tree readers, the iOS firmware fetcher |
-| `docs/` | how each part was found, run by run; the plan (`docs/port-plan.md`); the iOS firmware ([docs/ios-firmware.md](docs/ios-firmware.md)) |
+| `docs/` | how each part was found, run by run; the plan (`docs/port-plan.md`); the iOS firmware ([docs/ios-firmware.md](docs/ios-firmware.md)); the touchscreen ([docs/touchscreen-ft3681.md](docs/touchscreen-ft3681.md)) and its handoff ([docs/handoff-touch-i2c0.md](docs/handoff-touch-i2c0.md)) |
 | `device.conf` | the phone and each component's state (`works` / `partial` / `missing`) |
 | `pull-firmware.sh` | the phone's firmware out of the user's own phone into `fw-*/` |
 
