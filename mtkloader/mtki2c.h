@@ -121,33 +121,46 @@ static inline void wr16(uint64_t a, uint16_t v) { *(volatile uint16_t *)a = v; }
 static uint8_t i2c0_tx_buf[64] __attribute__((aligned(64)));
 static uint8_t i2c0_rx_buf[64] __attribute__((aligned(64)));
 
-static void fts_hw_reset(void)
+static void fts_reset_assert(void)
 {
 	/* GPIO20: mode 0x320 bitpos 16, MWR 0x32c, DIR 0x000 bit 20, DOUT 0x100 bit 20 */
 	wr32(GPIO_BASE + 0x320 + MWR_OFFSET, (0x8u | 0u) << 16);
 
 	wr32(GPIO_BASE + 0x004, 1u << 20);
 	wr32(GPIO_BASE + 0x108, 1u << 20);
-	dbg_delay_us(20000);
+}
+
+static void fts_reset_release(void)
+{
 	wr32(GPIO_BASE + 0x104, 1u << 20);
 	dbg_delay_us(200000);
 }
 
+/*
+ * The I2C0 pins: GPIO204 (SCL0) and GPIO205 (SDA0), in the IOCFG_LT block at 0x11f20000.
+ *
+ * Each field covers both pins in one register, with a bit per pin: 204 is the lower bit, 205 the
+ * next one (pinctrl-mt6885.c, mt6885_pin_ies_range and the rest). A register holds its value at
+ * +0x0, a "set" register at +0x4 and a "clear" register at +0x8.
+ *
+ * The settings are the ones the phone's own kernel has on these pins: the 203 ohm pull-ups
+ * (rsel = 3, R0 and R1 both 1), the input buffers on, the pull-downs off, the schmitt triggers on,
+ * and the drive strength at 7.
+ */
 static void i2c0_pin_pull_up(void)
 {
-	/* IES (0x0040): input enable for pin 204/205 (bit 15) */
-	wr32(IOCFG_LT_BASE + 0x0044, 1u << 15);
-	/* PD (0x0060): clear pull-down for pin 204/205 (bit 15) */
-	wr32(IOCFG_LT_BASE + 0x0068, 1u << 15);
-	/* PU (0x0080): set pull-up for pin 204/205 (bit 15) */
-	wr32(IOCFG_LT_BASE + 0x0084, 1u << 15);
-	/* SMT (0x00e0): clear schmitt-trigger for pin 204/205 (bit 7, Android SMT=0) */
-	wr32(IOCFG_LT_BASE + 0x00e8, 1u << 7);
-	/* R0/R1 (0x00d0): rsel=3 (R1R0=11 for 204 and 205 -> bits 3:0 all 1) */
+	/* IES (0x0040): input enable, 204 at bit 15 and 205 at bit 16 */
+	wr32(IOCFG_LT_BASE + 0x0044, (1u << 15) | (1u << 16));
+	/* PD (0x0060): clear pull-down, 204 at bit 15 and 205 at bit 16 */
+	wr32(IOCFG_LT_BASE + 0x0068, (1u << 15) | (1u << 16));
+	/* PU (0x0080): set pull-up, 204 at bit 15 and 205 at bit 16 */
+	wr32(IOCFG_LT_BASE + 0x0084, (1u << 15) | (1u << 16));
+	/* SMT (0x00e0): schmitt trigger, 204 at bit 7 and 205 at bit 8 */
+	wr32(IOCFG_LT_BASE + 0x00e4, (1u << 7) | (1u << 8));
+	/* R0/R1 (0x00d0): rsel = 3, 204 at bits 1:0 and 205 at bits 3:2 */
 	wr32(IOCFG_LT_BASE + 0x00d4, 0x0f);
-	/* EH (0x0020): drive-strength-adv 6 (bits 2:0=6, bits 5:3=6 -> 0x36) */
-	wr32(IOCFG_LT_BASE + 0x0028, 0x3f);
-	wr32(IOCFG_LT_BASE + 0x0024, (6u << 0) | (6u << 3));
+	/* EH (0x0020): drive strength, 204 at bits 2:0 and 205 at bits 5:3 */
+	wr32(IOCFG_LT_BASE + 0x0024, (7u << 0) | (7u << 3));
 }
 
 static void i2c0_pin_mode(uint32_t func)
