@@ -6,6 +6,33 @@
 set -e
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+usage() {
+	echo "Usage: $0 [options] [extra_xnu_args...]"
+	echo ""
+	echo "Options:"
+	echo "  -i, --instant, --skip-flash  Skip build and flash, reboot directly into HakiOS with current boot_a"
+	echo "  -c, --cpus <n>               Number of CPUs (e.g. 1, 2, 4)"
+	echo "  -s, --secs <n>               Execution duration in seconds before return (e.g. 30, 60, 300)"
+	echo "  -a, --args <str>             Kernel boot arguments string"
+	echo "  -f, --flash                  Rebuild loader and payload with args and flash boot_a first"
+	echo "  -h, --help                   Show this help message"
+	echo ""
+	echo "Examples:"
+	echo "  $0 -i"
+	echo "  $0 -c 1 -s 30"
+	echo "  $0 --cpus 2 --secs 60 -f"
+	echo "  $0 -c 1 -s 30 \"touchscreen=1\""
+	exit 0
+}
+
+# Quick check for help before adb device probing
+for arg in "$@"; do
+	if [ "$arg" = "-h" ] || [ "$arg" = "--help" ]; then
+		usage
+	fi
+done
+
 SERIAL="${HAKIOS_SERIAL}"
 
 if [ -z "$SERIAL" ]; then
@@ -25,27 +52,15 @@ CPUS="${XNU_CPUS:-}"
 SECS="${XNU_SECS:-}"
 ARGS="${XNU_ARGS:-}"
 FLASH=0
-
-usage() {
-	echo "Usage: $0 [options] [extra_xnu_args...]"
-	echo ""
-	echo "Options:"
-	echo "  -c, --cpus <n>      Number of CPUs (e.g. 1, 2, 4)"
-	echo "  -s, --secs <n>      Execution duration in seconds before return (e.g. 30, 60, 300)"
-	echo "  -a, --args <str>    Kernel boot arguments string"
-	echo "  -f, --flash         Rebuild loader and payload with args and flash boot_a first"
-	echo "  -h, --help          Show this help message"
-	echo ""
-	echo "Examples:"
-	echo "  $0 -c 1 -s 30"
-	echo "  $0 --cpus 2 --secs 60 -f"
-	echo "  $0 -c 1 -s 30 \"touchscreen=1\""
-	exit 0
-}
+INSTANT=0
 
 EXTRA_POS_ARGS=()
 while [ $# -gt 0 ]; do
 	case "$1" in
+		-i|--instant|--skip-flash|--skip-build)
+			INSTANT=1
+			shift
+			;;
 		-c|--cpus|--cpu)
 			CPUS="$2"
 			shift 2
@@ -94,7 +109,9 @@ ARGS=$(echo "$ARGS" | xargs)
 IMG="$ROOT/xnu-flashed-slot_a.img"
 REBUILD=0
 
-if [ "$FLASH" -eq 1 ] || [ ! -f "$IMG" ]; then
+if [ "$INSTANT" -eq 1 ]; then
+	REBUILD=0
+elif [ "$FLASH" -eq 1 ] || [ ! -f "$IMG" ]; then
 	REBUILD=1
 elif [ -n "$CPUS" ] || [ -n "$SECS" ] || [ -n "$ARGS" ]; then
 	REBUILD=1
