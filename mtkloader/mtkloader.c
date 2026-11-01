@@ -307,6 +307,12 @@ uint64_t irq_count, irq_intid;
 
 static uint64_t lk_dtb;
 
+/* Dynamic runtime boot override parameters passed from Android via /dev/pmsg0 */
+static uint32_t runtime_cpus = 0;
+static uint32_t runtime_secs = 0;
+static char runtime_extra_args[256];
+static char runtime_cmdline[608];
+
 /* ---- small libc (device memory: plain loops, word copies when aligned) ---- */
 
 void *memset(void *dst, int c, size_t n)
@@ -428,6 +434,7 @@ static void out_dec(uint64_t v)
 
 #include "mtkconnsys.h"         /* Wi-Fi step 1: Android's device tree on CONNSYS, printed (uses out()) */
 #include "mtki2c.h"
+#include "mt6360.h"
 
 /* ---- run state ---- */
 
@@ -1210,7 +1217,8 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 	dt_end(&w);
 
 	dt_begin(&w, "cpus");
-	for (int i = 0; i < XNU_CORES; i++) {
+	uint32_t active_cpus = (runtime_cpus >= 1 && runtime_cpus <= 7) ? runtime_cpus : XNU_CORES;
+	for (uint32_t i = 0; i < active_cpus; i++) {
 		char name[5] = { 'c', 'p', 'u', (char)('0' + i), 0 };
 		int core = core_order[i];
 
@@ -2013,7 +2021,8 @@ void watcher_main(void)
 	watcher_started = 1;
 	dcache_clean_range((uint64_t)&watcher_started, 8);
 
-	uint64_t end = dbg_ticks() + dbg_freq() * XNU_WATCH_SECONDS;
+	uint32_t watch_secs = (runtime_secs > 0) ? (runtime_secs + 240) : XNU_WATCH_SECONDS;
+	uint64_t end = dbg_ticks() + dbg_freq() * watch_secs;
 	while (dbg_ticks() < end) {
 		dcache_clean_range((uint64_t)&xnu_back, 8);
 		if (xnu_back) {
@@ -2034,7 +2043,7 @@ void watcher_main(void)
 	fbc.base = 0; /* the screen is XNU's: read it, do not draw on it */
 	marker_set(MARK_DONE);
 	dbg_puts("\n=== watcher: XNU still running after " );
-	dbg_dec(XNU_WATCH_SECONDS);
+	dbg_dec(watch_secs);
 	dbg_puts(" s, snapshot ===\n");
 	if (xsyms.cpu_ttep) {
 		xnu_fp[3] = *(volatile uint64_t *)kva_to_pa(xsyms.cpu_ttep);
@@ -2131,13 +2140,15 @@ void watcher_main(void)
 
 static void watcher_start(void)
 {
-	if (!XNU_WATCH_SECONDS) {
+	if (!XNU_WATCH_SECONDS && !runtime_secs) {
 		return;
 	}
 	watcher_started = 0;
-	int64_t r = psci_cpu_on((uint64_t)WATCH_CORE << 8, (uint64_t)watcher_entry, 0);
+	uint32_t active_cpus = (runtime_cpus >= 1 && runtime_cpus <= 7) ? runtime_cpus : XNU_CORES;
+	uint8_t watch_core = core_order[active_cpus];
+	int64_t r = psci_cpu_on((uint64_t)watch_core << 8, (uint64_t)watcher_entry, 0);
 	out("watcher on cpu");
-	out_dec(WATCH_CORE);
+	out_dec(watch_core);
 	out(": PSCI CPU_ON ");
 	out_dec((uint64_t)r);
 	for (int i = 0; i < 100 && !watcher_started; i++) {
@@ -2288,7 +2299,13 @@ static uint8_t touch_bring_up(void)
 {
 	out("touch: probing MT6893 I2C0 for FocalTech FT3681...\n");
 	i2c0_dump_state("pre");
-	fts_hw_reset();
+	/* the touch rail is MT6360 LDO2 on I2C5; it is off at this point, and the chip cannot
+	 * answer on I2C0 until it is on. The order is the vendor driver's: hold the chip in
+	 * reset, power the rail, then let it go. */
+	fts_reset_assert();
+	mt6360_enable_touch_rail();
+	dbg_delay_us(20000);
+	fts_reset_release();
 	mtk_i2c0_ungate_clocks();
 	i2c0_pin_pull_up();
 	i2c_bb_scan();
@@ -2597,7 +2614,107 @@ static void __attribute__((noreturn)) run_xnu(void)
 	ba->video.v_width = PANEL_W;
 	ba->video.v_height = PANEL_H;
 	ba->video.v_depth = 32;
-	memcpy(ba->commandLine, XNU_BOOT_ARGS, sizeof(XNU_BOOT_ARGS));
+
+	/* Assemble command line, merging runtime dynamic overrides if present */
+	{
+		uint32_t active_cpus = (runtime_cpus >= 1 && runtime_cpus <= 7) ? runtime_cpus : 0;
+		uint32_t d = 0;
+		int seen_cpus = 0;
+		int seen_secs = 0;
+		const char *p = XNU_BOOT_ARGS;
+
+		while (*p) {
+			while (*p == ' ') p++;
+			if (!*p) break;
+			const char *wstart = p;
+			while (*p && *p != ' ') p++;
+			uint32_t wlen = (uint32_t)(p - wstart);
+
+			if (wlen >= 5 && wstart[0] == 'c' && wstart[1] == 'p' && wstart[2] == 'u' &&
+			    wstart[3] == 's' && wstart[4] == '=') {
+				seen_cpus = 1;
+				if (d && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = ' ';
+				if (active_cpus > 0) {
+					const char *prefix = "cpus=";
+					while (*prefix && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = *prefix++;
+					char num[12];
+					uint32_t val = active_cpus;
+					int pos = 0;
+					if (val == 0) num[pos++] = '0';
+					else {
+						char tmp[12]; int tp = 0;
+						while (val) { tmp[tp++] = (char)('0' + (val % 10)); val /= 10; }
+						while (tp > 0) num[pos++] = tmp[--tp];
+					}
+					for (int i = 0; i < pos && d + 1 < sizeof(runtime_cmdline); i++) runtime_cmdline[d++] = num[i];
+				} else {
+					for (uint32_t i = 0; i < wlen && d + 1 < sizeof(runtime_cmdline); i++) runtime_cmdline[d++] = wstart[i];
+				}
+			} else if (wlen >= 20 && memcmp_n(wstart, "loader_return_after=", 20) == 0) {
+				seen_secs = 1;
+				if (d && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = ' ';
+				if (runtime_secs > 0) {
+					const char *prefix = "loader_return_after=";
+					while (*prefix && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = *prefix++;
+					char num[12];
+					uint32_t val = runtime_secs;
+					int pos = 0;
+					if (val == 0) num[pos++] = '0';
+					else {
+						char tmp[12]; int tp = 0;
+						while (val) { tmp[tp++] = (char)('0' + (val % 10)); val /= 10; }
+						while (tp > 0) num[pos++] = tmp[--tp];
+					}
+					for (int i = 0; i < pos && d + 1 < sizeof(runtime_cmdline); i++) runtime_cmdline[d++] = num[i];
+				} else {
+					for (uint32_t i = 0; i < wlen && d + 1 < sizeof(runtime_cmdline); i++) runtime_cmdline[d++] = wstart[i];
+				}
+			} else {
+				if (d && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = ' ';
+				for (uint32_t i = 0; i < wlen && d + 1 < sizeof(runtime_cmdline); i++) runtime_cmdline[d++] = wstart[i];
+			}
+		}
+
+		if (active_cpus > 0 && !seen_cpus) {
+			if (d && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = ' ';
+			const char *prefix = "cpus=";
+			while (*prefix && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = *prefix++;
+			char num[12];
+			uint32_t val = active_cpus;
+			int pos = 0;
+			if (val == 0) num[pos++] = '0';
+			else {
+				char tmp[12]; int tp = 0;
+				while (val) { tmp[tp++] = (char)('0' + (val % 10)); val /= 10; }
+				while (tp > 0) num[pos++] = tmp[--tp];
+			}
+			for (int i = 0; i < pos && d + 1 < sizeof(runtime_cmdline); i++) runtime_cmdline[d++] = num[i];
+		}
+
+		if (runtime_secs > 0 && !seen_secs) {
+			if (d && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = ' ';
+			const char *prefix = "loader_return_after=";
+			while (*prefix && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = *prefix++;
+			char num[12];
+			uint32_t val = runtime_secs;
+			int pos = 0;
+			if (val == 0) num[pos++] = '0';
+			else {
+				char tmp[12]; int tp = 0;
+				while (val) { tmp[tp++] = (char)('0' + (val % 10)); val /= 10; }
+				while (tp > 0) num[pos++] = tmp[--tp];
+			}
+			for (int i = 0; i < pos && d + 1 < sizeof(runtime_cmdline); i++) runtime_cmdline[d++] = num[i];
+		}
+
+		if (runtime_extra_args[0]) {
+			if (d && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = ' ';
+			const char *ex = runtime_extra_args;
+			while (*ex && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = *ex++;
+		}
+		runtime_cmdline[d] = '\0';
+	}
+	memcpy(ba->commandLine, runtime_cmdline, sizeof(ba->commandLine));
 
 	out("md0 ");
 	out_hex(sys_size ? sys_pa : rd_pa);
@@ -2606,7 +2723,9 @@ static void __attribute__((noreturn)) run_xnu(void)
 	if (sys_size) {
 		out_hex(rd_pa);
 	}
-	out("\nboot-args: " XNU_BOOT_ARGS "\nframebuffer ");
+	out("\nboot-args: ");
+	out(runtime_cmdline);
+	out("\nframebuffer ");
 	out_hex(fb_base);
 	out(" pitch ");
 	out_dec(fb_pitch);
@@ -3296,8 +3415,62 @@ static int pmsg_take(const char *flag, uint32_t n)
 			k++;
 		}
 		if (k == n) {
-			for (k = 0; k < n; k++) {
-				d[at + k] = '-';
+			uint32_t p = at + n;
+			uint32_t wipe_end = p;
+
+			/* Parse optional parameters: :cpus=N:secs=N:extra=ARGS */
+			if (p < cap && d[p] == ':') {
+				uint32_t end = p;
+				while (end < cap && d[end] != '\r' && d[end] != '\n' && d[end] != '\0') {
+					end++;
+				}
+				wipe_end = end;
+
+				uint32_t cur = p + 1;
+				while (cur < end) {
+					uint32_t next = cur;
+					while (next < end && d[next] != ':') {
+						next++;
+					}
+					uint32_t param_len = next - cur;
+
+					if (param_len >= 5 && d[cur] == 'c' && d[cur+1] == 'p' && d[cur+2] == 'u' &&
+					    d[cur+3] == 's' && d[cur+4] == '=') {
+						uint32_t val = 0;
+						for (uint32_t i = cur + 5; i < next; i++) {
+							if (d[i] >= '0' && d[i] <= '9') {
+								val = val * 10 + (uint32_t)(d[i] - '0');
+							}
+						}
+						if (val >= 1 && val <= 7) {
+							runtime_cpus = val;
+						}
+					} else if (param_len >= 5 && d[cur] == 's' && d[cur+1] == 'e' && d[cur+2] == 'c' &&
+					           d[cur+3] == 's' && d[cur+4] == '=') {
+						uint32_t val = 0;
+						for (uint32_t i = cur + 5; i < next; i++) {
+							if (d[i] >= '0' && d[i] <= '9') {
+								val = val * 10 + (uint32_t)(d[i] - '0');
+							}
+						}
+						runtime_secs = val;
+					} else if (param_len >= 6 && d[cur] == 'e' && d[cur+1] == 'x' && d[cur+2] == 't' &&
+					           d[cur+3] == 'r' && d[cur+4] == 'a' && d[cur+5] == '=') {
+						uint32_t elen = next - (cur + 6);
+						if (elen >= sizeof(runtime_extra_args)) {
+							elen = sizeof(runtime_extra_args) - 1;
+						}
+						for (uint32_t i = 0; i < elen; i++) {
+							runtime_extra_args[i] = d[cur + 6 + i];
+						}
+						runtime_extra_args[elen] = '\0';
+					}
+					cur = next + 1;
+				}
+			}
+
+			for (k = at; k < wipe_end; k++) {
+				d[k] = '-';
 			}
 			found = 1;
 		}
@@ -3727,6 +3900,11 @@ void mtkloader_main(uint64_t dtb)
 		chain_android();
 	}
 	plog_reset();
+	out("pmsg: cpus=");
+	out_dec(runtime_cpus);
+	out(" secs=");
+	out_dec(runtime_secs);
+	out("\n");
 	fb_rect(0, 0, PANEL_W, PANEL_H, 0xff000000u);
 	fbc.x = 0;
 	fbc.y = fbc.top = 0;

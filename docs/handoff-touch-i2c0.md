@@ -275,3 +275,69 @@ Create `refs/hakios-xnu-kernel/drivers/input/hakios.ft3681.c` following the temp
 3. **SELinux State**: Do not alter device SELinux mode.
 4. **Git Commits**: Commit each completed task cleanly without AI trailers (`Co-Authored-By`, `Signed-off-by`).
 5. **Flash Active Slot Only**: Flash only to active slot `_a` (`fastboot flash boot_a ...`).
+
+---
+
+## 7. What was actually wrong (added 2026-11-01, after the run)
+
+The touch rail is **MT6360 LDO2** (`vtp`, 3.3 V) on **I2C5** (`0x11f00000`), and it must be switched
+on from the loader before the FT3681 is reset. Two things were wrong in the loader; both are fixed
+in `mtkloader/mt6360.h` (new file) and `mtkloader/mtki2c.h`.
+
+### 7.1 The rail (MT6360 LDO2 over I2C5)
+
+The phone's own regulator module for this chip is the MTK/Richtek 5.10 one
+(`/mnt/project/HoshimaticProject/.mt6893_index/drivers/regulator/mt6360-regulator.c`, the source of
+the shipped `mt6360-regulator.ko`). Its framing is **flat**, not the 6.1 core's banked one:
+
+- slave id: the LDO bank, `0x64`; the wire address byte is `0xc8`
+- voltage selector register `0x15` (LDO2 CTRL3), 3.3 V is `0xd0`
+- enable register `0x11` (LDO2 EN_CTRL2), enable mask `0x40`
+- write on the wire: `[reg, value, crc8, 0x00]`, where the CRC-8 (poly `0x07`, MSB first, init 0)
+  covers `[address byte, reg, value]` — so over `[0xc8, 0x11, 0x40]` it is `0x59`, and over
+  `[0xc8, 0x15, 0xd0]` it is `0xf4`
+- read: write the register, then read `[value, crc8]`, the CRC over `[0xc9, reg, value]`
+
+`mtkloader/mt6360.h` does exactly this and reads the register back. The **enable write must be a
+read-modify-write**: at handover the register holds `0x80` (bits the vendor driver leaves alone),
+and writing `0x40` outright wipes them.
+
+I2C5's own setup (all in `mt6360.h`): gate `imp_iic_wrap_n` bit 0 (`0x11f02000 + 0xe04`), the IFRAO3
+i2c5 gates (`0x10001000 + 0xa8`, bits 18..20), the shared `i2c_ck` parent mux in TOPCKGEN
+(`CLK_CFG_10`, the same one I2C0 uses), and pins GPIO202 (SCL5) / GPIO203 (SDA5) at function 1 with
+their IOCFG in **IOCFG_TM at `0x11f30000`** (not IOCFG_LT).
+
+### 7.2 The I2C0 pins
+
+`pinctrl-mt6885.c` gives **one bit per pin** in the shared IOCFG registers, so GPIO204 is the
+lower bit and GPIO205 the next one:
+
+| field | GPIO204 | GPIO205 |
+|---|---|---|
+| IES (0x0040) | bit 15 | bit 16 |
+| PU (0x0080) | bit 15 | bit 16 |
+| PD (0x0060) | bit 15 | bit 16 |
+| SMT (0x00e0) | bit 7 | bit 8 |
+| R0/R1 (0x00d0) | bits 1:0 | bits 3:2 |
+| EH (0x0020) | bits 2:0 | bits 5:3 |
+
+The loader set only bit 15 everywhere, so **SDA (GPIO205) had no pull-up and no input enable**:
+the bus looked alive (both lines high) but no device could be reached. With both pins configured
+the scan finds `0x38` and the chip answers.
+
+### 7.3 The result
+
+From the phone's log (`logs/xnu-last.log`), after the loader powers the rail and resets the chip:
+
+```
+i2c0-bb: mode=0x0 hi=3 scl_lo=1 sda_lo=2 drv0_din=0x0 drv1_din=0x3 ack: 0x38
+touch: probe chip_id=0x5662 fw_ver=0x44 vendor=0x8d points=15
+touch: 63-byte report over DMA ok, mode=0x0 points=15
+touch: FocalTech FT3681 active and ready on I2C0 (0x38)
+```
+
+Chip ID `0x5662`, firmware `0x44`, vendor `0x8d` are the values the handoff predicted.
+
+Open question for the XNU driver: the report's contact count reads as 15 (four bits), while the
+chip has at most 10 contacts, so the TD_STATUS bit layout in this firmware needs a second look
+before the XNU side trusts `points`.
