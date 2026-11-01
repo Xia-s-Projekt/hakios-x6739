@@ -216,11 +216,22 @@ The reference port's touch is an OmniVision TD4160, a TCM controller on SPI2. Th
 - Chip ID: `0x5662` (High `0x56` @ `0xA3`, Low `0x62` @ `0x9F`), FW Version: `0x44` @ `0xA6`, Vendor ID: `0x8D` @ `0xA8`.
 - SCL0 is Pin 204 (Mode 1), SDA0 is Pin 205 (Mode 1).
 - Reset GPIO is Pin 20 (Mode 0), Interrupt GPIO is Pin 21 (Mode 0, GIC SPI 245 = GIC interrupt 277).
-- Power supply: MT6360 PMIC LDO2 (`vtp`), default on.
-- See `docs/touchscreen-ft3681.md` for complete register mappings, APDMA clocking, and XNU driver specifications.
+- Power supply: MT6360 LDO2 (`vtp`, 3.3V) on I2C5 (`/soc/i2c@11f00000`, slave ID `0x64`). Not enabled at boot by LK; requires explicit enable command via I2C5 with SMBus CRC-8.
+- The I2C0 controller uses the **v2** register table (the phone's own `i2c-mt65xx.ko` carries
+  `mt6873_compat`, which in Linux 6.1 is `mt_i2c_regs_v2` with `slave_addr_ver` unset): the slave
+  address goes to `SLAVE_ADDR` at 0x04, never to `SLAVE_ADDR1` at 0x94. All the controller's
+  registers are 16 bits wide.
+- The I2C0 clock parent is `i2c_sel` in TOPCKGEN, and the phone runs it at **124800000 Hz**
+  (`univpll_d5_d4`, mux index 2) — from the phone's own clock dump, `logs/clk_summary.txt`.
+- See `docs/touchscreen-ft3681.md` for complete register mappings, APDMA clocking, and XNU driver
+  specifications, and `docs/handoff-touch-i2c0.md` for the state of the work and the next steps.
 
 ## Port status
 
 - **Boot & Display:** Confirmed working. `mtkloader` boots XNU, iOS 16.5 SpringBoard renders onto the 1080x2400 panel (framebuffer at `0x76a10000`, pitch 4352 on `0x14001000` OVL0_2L).
-- **Touch Screen:** Stage 1 in progress. Controller identified as FocalTech FT3681 on I2C0. Register writes confirmed 16-bit wide; APDMA and bitbang interfaces defined in `mtkloader/mtki2c.h`.
-- **Userland Touch Input:** Confirmed working. `backboardd` runs and consumes `/dev/hakios-touch`. Synthetic touch injection via `rwtouch` functions properly. Physical driver (`bsd/dev/x6739_ft3681.c`) next.
+- **Touch Screen:** Hardware controller operational. Controller identified as FocalTech FT3681 on I2C0;
+  the register table, clock mux, gate registers, pinctrl pinconf (203 ohm pull-up, drive strength 6),
+  and 400 kHz timings are implemented in `mtkloader/mtki2c.h`. The controller completes bus transfers
+  cleanly (`DEBUGSTAT = 0x700`, `stat = 0x3`). FT3681 slave address `0x38` NACKs because MT6360 LDO2
+  (`vtp`, 3.3V) on I2C5 is unpowered by LK; turning on LDO2 powers the touch IC.
+- **Userland Touch Input:** Confirmed working. `backboardd` runs and consumes `/dev/hakios-touch`. Synthetic touch injection via `rwtouch` functions properly. Physical driver (`bsd/dev/hakios.ft3681.c`) next.

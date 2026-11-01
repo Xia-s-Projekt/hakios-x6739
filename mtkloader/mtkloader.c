@@ -2280,25 +2280,32 @@ static uint8_t touch_bring_up_once(void)
  * it up; this was what left iOS without a touch screen.
  *
  * MT6893: the reference board's touch is an OmniVision TD4160, a TCM controller on SPI2. This
- * board's tree says nothing of the sort: /touch is only "mediatek,touch", a GPIO interrupt with
- * no controller behind it, and the panel is an nt37703 over DSI. So this whole path is the
- * reference board's and does not apply; what this phone's touch is has to be found first (see
- * docs/mt6893-facts.md). Until then the loader does not touch the controller, and says so.
+ * board's is a FocalTech FT3681 on I2C0 (see docs/touchscreen-ft3681.md). The path below probes
+ * it over I2C0; the controller's register table, clocks, pinmux and timings are all in
+ * docs/handoff-touch-i2c0.md, which also lists what mtki2c.h still gets wrong.
  */
 static uint8_t touch_bring_up(void)
 {
 	out("touch: probing MT6893 I2C0 for FocalTech FT3681...\n");
+	i2c0_dump_state("pre");
 	fts_hw_reset();
+	mtk_i2c0_ungate_clocks();
+	i2c0_pin_pull_up();
+	i2c_bb_scan();
+	i2c_hw_pinmux();
 	mtk_i2c0_init_hw();
+	i2c0_dump_state("hw");
 
 	out("i2c0: TIMING=");
-	out_hex(rd32(I2C0_BASE + I2C_REG_TIMING));
-	out(" CLK_DIV=");
-	out_hex(rd32(I2C0_BASE + I2C_REG_CLOCK_DIV));
+	out_hex(rd16(I2C0_BASE + I2C_REG_TIMING));
+	out(" LTIMING=");
+	out_hex(rd16(I2C0_BASE + I2C_REG_LTIMING));
+	out(" EXT_CONF=");
+	out_hex(rd16(I2C0_BASE + I2C_REG_EXT_CONF));
 	out(" CONTROL=");
-	out_hex(rd32(I2C0_BASE + I2C_REG_CONTROL));
-	out(" WRAP_C_STA=");
-	out_hex(rd32(IMP_IIC_WRAP_C_BASE + 0xe00));
+	out_hex(rd16(I2C0_BASE + I2C_REG_CONTROL));
+	out(" DEBUGSTAT=");
+	out_hex(rd16(I2C0_BASE + I2C_REG_DEBUGSTAT));
 	out("\n");
 
 	uint8_t chip_h = 0, chip_l = 0, fw_ver = 0, vendor_id = 0, td_status = 0;
@@ -2335,6 +2342,23 @@ static uint8_t touch_bring_up(void)
 		out("ERR");
 	}
 	out("\n");
+
+	{
+		uint8_t reg = FTS_REG_DEV_MODE, report[63];
+		int r_dma = mtk_i2c0_write_read(FTS_SLAVE_ADDR, &reg, 1, report, sizeof(report));
+		out("touch: 63-byte report over DMA ");
+		if (r_dma == 0) {
+			out("ok, mode=");
+			out_hex(report[0]);
+			out(" points=");
+			out_dec(report[2] & 0x0fu);
+		} else {
+			out("FAIL(err=");
+			out_dec((uint32_t)-r_dma);
+			out(")");
+		}
+		out("\n");
+	}
 
 	if (r_h == 0 && r_l == 0 && chip_h == 0x56 && chip_l == 0x62) {
 		out("touch: FocalTech FT3681 active and ready on I2C0 (0x38)\n");
