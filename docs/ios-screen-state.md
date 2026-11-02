@@ -301,6 +301,29 @@ Steps 2 and 5 change the phone: step 2 shortens Android's userdata and erases
 Android's data, and step 5 replaces the boot image. Both need the user's
 go-ahead.
 
+## The phone's own partition table, and what a `darwin` would look like
+
+This phone's GPT (`backup/sdc-gpt-primary.bin`, LUN 2, 238 GiB, 4096-byte
+sectors): `super` 10.60 GiB, `tranfs` 0.29 GiB, `userdata` 226.03 GiB at lba
+3223552..62476282, `flashinfo` at the end. The `xnusys` partition is not an
+entry of the *original* table: it was carved out of userdata's tail by our own
+`tools/gpt-carve.py`, which shrank userdata to lba 3223552..61427455 and added
+`xnusys` at 61427456..62476282 (4 GiB) as an entry of its own. The carved
+tables are `backup/sdc-gpt-primary.bin.new` and `sdc-gpt-secondary.bin.new`.
+
+So the tool that would carve a `darwin` partition is already written and already
+used on this phone: it takes space off the end of a partition and puts a new
+entry in its place, leaving every other entry, the disk GUID and the entry order
+exactly as they were. `darwin` would want 20 GiB, which is 9 % of userdata's
+226 GiB.
+
+What is missing for that is not the tool but the image: the tree's `darwin`
+partition holds Apple's root volume of the IPSW with the OS and App cryptexes
+after it, 8.4 GB in 11 sparse pieces. This tree has the IPSW's unpacked images
+(`sysimage/rootfs`, `sysimage/cryptex`, `sysimage/cryptex-app`) and the tools to
+make the volume (`tools/apfs/dmg.py extract`) and to split it for writing
+(`tools/sparse-split.py`).
+
 ## The Setup Assistant
 
 The tree refuses it deliberately: `userland/src/inject_sb.c` replaces
