@@ -188,8 +188,8 @@ persistent data volume is `var_hfs=DEV` (`userland/src/init.c:825`,
 `var_hfs` among the kernel's arguments.
 
 So: the wallpaper needs a data volume the phone does not have yet. (The Apple logo
-on the panel is a different thing: it is the boot UI, and it goes away with time --
-see above.)
+on the panel is a different thing: it is the boot UI overlay, and it is a separate
+problem -- see above.)
 
 The tree's own answer is `ufs_write=1 var_hfs=ufs_darwin_data` on the kernel's
 command line: with `ufs_write=1` the UFS driver gives the stretch of the phone's
@@ -271,10 +271,23 @@ The four checks that fail in our run are the visible edge of this:
 - "a synthetic /redwood on it, for this image" -- our own image is already bound
   there.
 
-So the tree's phone has the applications, the cryptexes and the shared cache, and
-ours does not. That is a difference in what is on the phone's flash, not in the
-kernel: our flash has the iOS volume (`xnusys`) but not the tree's Darwin volume
-with its cryptexes and staged applications.
+But the phone's flash is better than that says. The tree's `system.apfs` was
+written into the `xnusys` partition (`tools/system-flash.sh`), and the kernel
+reads it:
+
+    -- the iOS root volume on /dev/ufs_xnusys as the root --
+    apfs: volume 0 "System" of container 0 (at 0 MB): 45044 files,
+    16547 directories, 601698 blocks of 4096 used
+
+So the whole system image -- the applications, the Darwin files, the manifest's
+permissions -- is on the phone's flash and is the root. What is missing is only
+what the *small* root would have carried alongside it: the two cryptexes, with
+the shared cache in the OS one, and the 32 staged applications (which the tree's
+`userland/build.sh` moves out of `private/var/staged_system_apps` into
+`/Applications` while making the system image).
+
+In other words: the flash half of the tree's arrangement is done, and the
+cryptexes are the half that is not.
 
 The tree's own steps (`docs/u-boot.md`, the phone's own list), which say exactly
 what that takes:
@@ -381,9 +394,12 @@ And the system image with the applications in it, built the tree's way
 
 So the whole of what the tree's phone has that ours does not -- the OS cryptex
 with the shared cache, the App cryptex, and the applications of the system image
--- can be built on this machine, from what this tree already has unpacked. What
-is left is the phone: the `darwin` partition to put the Darwin volume in, and
-the boot image to boot from it.
+-- can be built on this machine, from what this tree already has unpacked.
+
+The applications are already on the phone (the `System` volume of 45044 files
+that the kernel reads as the root), so what is left to build and put on the
+phone is the two cryptexes -- 1.0 GB and 4.2 MB, as the containers 1 and 2 of
+the boot volume, the first carrying the shared cache the kernel takes.
 
 ## The Setup Assistant
 
