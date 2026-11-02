@@ -1269,7 +1269,16 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 	dt_prop_u64(&w, "dram-base", XNU_PHYS_BASE);
 	dt_prop_u64(&w, "dram-size", XNU_MEM_SIZE);
 	dt_prop_u32(&w, "debug-enabled", 1);
-	dt_prop_u32(&w, "display-scale", 2);
+	/*
+	 * What MobileGestalt answers "main screen scale" from: the device pixels one point is
+	 * drawn with. The display driver reports the iPhone X's 1125 x 2436 whatever the panel
+	 * is, and that is 375 x 812 points at three pixels a point -- so three is what the
+	 * scale has to be. With two, the window server read "main screen size:{1125, 2436}
+	 * scale:2" and laid the user interface out for 562 x 1218 points, and everything on it
+	 * came out small: the icons of the home screen are a size in points, so on a screen
+	 * the system believes is nearly twice as wide they are half as big as they should be.
+	 */
+	dt_prop_u32(&w, "display-scale", 3);
 	dt_prop_u32(&w, "display-rotation", 0);
 	dt_prop_str(&w, "psci-method", "smc");
 	static const uint8_t wifi_address[6] = { 0x02, 0x52, 0x44, 0x57, 0x00, 0x01 };
@@ -1824,6 +1833,83 @@ static void read_screen(void)
 }
 
 /*
+ * A picture of the panel, in the form the host's tools/fbshot.py makes a PNG of: the picture
+ * is one line per 150 bytes, base64, under "fbshot N:". What was on the panel when XNU came
+ * back is the only way to tell what the window server put there -- the phone cannot be looked
+ * at while it runs, and its own console says nothing about the picture.
+ *
+ * The pixels are sampled down: the panel is 1080x2400, and what is wanted is a picture small
+ * enough to fit in the console ring. One pixel of every STEP in each direction is taken, so
+ * the picture is PANEL_W/STEP wide.
+ *
+ * The colours are as they are in memory: a word is B G R A from the lowest byte up, and the
+ * picture wants R G B.
+ */
+#define SHOT_STEP    27
+#define SHOT_W       (PANEL_W / SHOT_STEP)
+#define SHOT_H       (PANEL_H / SHOT_STEP)
+#define SHOT_BYTES   (SHOT_W * SHOT_H * 3)
+
+static uint8_t shot_pixels[SHOT_BYTES];
+
+/* Downsample the panel into shot_pixels. */
+static void shot_panel(void)
+{
+	uint32_t used = 0;
+
+	if (!fb_base || !fb_pitch) {
+		return;
+	}
+	for (uint32_t y = 0; y < SHOT_H; y++) {
+		const volatile uint32_t *row = (const volatile uint32_t *)
+		    (fb_base + (uint64_t) (y * SHOT_STEP + SHOT_STEP / 2) * fb_pitch);
+
+		for (uint32_t x = 0; x < SHOT_W; x++) {
+			uint32_t pixel = row[x * SHOT_STEP + SHOT_STEP / 2];
+
+			shot_pixels[used++] = (uint8_t) ((pixel >> 16) & 0xff);    /* R */
+			shot_pixels[used++] = (uint8_t) ((pixel >> 8) & 0xff);     /* G */
+			shot_pixels[used++] = (uint8_t) (pixel & 0xff);            /* B */
+		}
+	}
+}
+
+/* The picture, as the host's tools/fbshot.py reads it. */
+static void shot_print(void)
+{
+	static const char digits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	uint64_t fb = fbc.base;
+
+	fbc.base = 0;  /* the picture is in the log, not on the panel */
+	dbg_puts("fbshot 1: begin ");
+	dbg_dec(SHOT_W);
+	dbg_putc(' ');
+	dbg_dec(SHOT_H);
+	dbg_puts(" (the panel when XNU came back)\n");
+	for (uint32_t at = 0; at < SHOT_BYTES; at += 150) {
+		uint32_t n = SHOT_BYTES - at < 150 ? SHOT_BYTES - at : 150;
+		char line[205];
+		uint32_t k = 0;
+
+		for (uint32_t i = 0; i + 2 < n; i += 3) {
+			uint32_t v = (uint32_t) shot_pixels[at + i] << 16 |
+			    (uint32_t) shot_pixels[at + i + 1] << 8 | shot_pixels[at + i + 2];
+
+			line[k++] = digits[v >> 18 & 63];
+			line[k++] = digits[v >> 12 & 63];
+			line[k++] = digits[v >> 6 & 63];
+			line[k++] = digits[v & 63];
+		}
+		line[k] = 0;
+		dbg_puts("fbshot 1: ");
+		dbg_puts(line);
+		dbg_putc('\n');
+	}
+	dbg_puts("fbshot 1: end\n");
+	fbc.base = fb;
+}
+
+/*
  * XNU is back (start.S xnu_return_stub): MMU off, our vectors, our stack. Its log was
  * linearized and written back to RAM by XNU. Save it, show its end, then reset into Android.
  */
@@ -1837,7 +1923,15 @@ void xnu_returned(uint64_t log_pa, uint64_t len, uint64_t reason, uint64_t code,
 	uint64_t screen = fbc.base;
 	fbc.base = 0; /* nothing drawn over XNU's console before it has been read */
 	dbg_puts("\n=== what the screen showed when XNU came back ===\n");
+	/*
+	 * XNU wrote the picture with its caches on, and the stub wrote back only its log: what
+	 * it left on the panel is still in the cache. Write it back before it is read.
+	 */
+	if (fb_base && fb_pitch) {
+		dcache_clean_range(fb_base, (uint64_t) fb_pitch * PANEL_H);
+	}
 	read_screen();
+	shot_panel();
 	fbc.base = screen;
 	fbc.fg = 0xffffff40u;
 	out("\n=== XNU returned to mtkloader: reason ");
@@ -1878,6 +1972,7 @@ void xnu_returned(uint64_t log_pa, uint64_t len, uint64_t reason, uint64_t code,
 	}
 	save_log(&sp, 1);
 	dbg_puts("=== end of XNU log ===\n");
+	shot_print();
 	show_log_tail(40);
 	dbg_delay_ms(2000);
 	reset_board();
@@ -2861,6 +2956,8 @@ static void __attribute__((noreturn)) run_xnu(void)
 
 	uint64_t dt_pa = sys_size ? sys_pa + sys_span : rd_pa + rd_size;
 	uint32_t dt_len = build_device_tree(dt_pa, rd_pa, rd_size, sys_pa, sys_span);
+	/* what the window server will believe the screen is: 375 x 812 points at three pixels a point */
+	out("display: 375 x 812 points at 3 pixels a point (display-scale 3)\n");
 	uint64_t ba_pa = (dt_pa + dt_len + PAGE_SIZE_MAX - 1) & ~(PAGE_SIZE_MAX - 1);
 	uint64_t top = ba_pa + PAGE_SIZE_MAX;
 
