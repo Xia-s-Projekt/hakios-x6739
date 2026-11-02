@@ -110,6 +110,9 @@ static inline void wr16(uint64_t a, uint16_t v) { *(volatile uint16_t *)a = v; }
 #define FTS_REG_FW_VER            0xa6u
 #define FTS_REG_VENDOR_ID         0xa8u
 
+/* The touch report and its decoding: mtkloader/fts_report.h. */
+#include "fts_report.h"
+
 /*
  * MT6885 Paris pinctrl: race_free_access is true.
  * Writing pinmux mode MUST go to MWR_OFFSET (0x0c) with bit 3 (0x8) set per nibble.

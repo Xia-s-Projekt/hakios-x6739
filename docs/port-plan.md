@@ -146,7 +146,7 @@ The reference port's order, each step read-only first, each step's result said i
 | 3 | storage | UFS, not eMMC (step 2) |
 | 4 | GPU | the reference is Mali-G52 MC2; this is **Mali-G77 MC9** (`valhall-1691526.wa`) — a newer generation, so the bring-up sequence differs |
 | 5 | audio and battery | both come through the audio DSP on the reference board; this board's audio is its own subsystem (`adsp_common@10800000`, `mt6885-afe-pcm@11210000`) |
-| 6 | Wi-Fi | the reference drives CONNSYS over BTIF/STP; this board's is the **soc3_0** generation, not soc1_0 |
+| 6 | Wi-Fi | the reference drives CONNSYS over BTIF/STP; this board's is the **conninfra** generation, so the reference's driver does not carry over — see [wifi-mt6893.md](wifi-mt6893.md) |
 
 ## 5. Record and publish
 

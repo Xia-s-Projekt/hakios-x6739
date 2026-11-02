@@ -25,7 +25,7 @@ pstore. What does not carry over:
 | GPU | Mali-G52 MC2 | Mali-G77 MC9 (`valhall`) |
 | display | LK's framebuffer, 720×1640 | `mt6893-disp` pipeline, 1080×2400, DSI0+DSI1, a Tianma NT37705 panel |
 | touch | OmniVision TD4160 over SPI2 | **FocalTech FT3681 over I2C0** (`0x11015000`, slave `0x38`; SCL0=GPIO 204, SDA0=GPIO 205, reset=GPIO 20, IRQ=GPIO 21) |
-| CONNSYS firmware | the soc1_0 generation | the **soc3_0** generation |
+| CONNSYS | the MT6768's "connac1x": a microcontroller in the SoC, spoken to over BTIF/STP | the **conninfra**: a separate conn-infra microcontroller, the radio over AXI and SPI, and the `soc3_0` firmware — see [docs/wifi-mt6893.md](docs/wifi-mt6893.md) |
 | boot partition | 32 MiB | 64 MiB |
 | ramoops | console `0x4d09f000`, pmsg `0x4d0e0000` | console `0x480ef000`, pmsg `0x48130000` |
 
