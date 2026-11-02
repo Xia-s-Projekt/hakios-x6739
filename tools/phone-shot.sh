@@ -2,10 +2,16 @@
 # Wait for the phone to come back, then take the picture of the panel at once.
 #
 # The phone goes off the host's USB entirely while iOS runs, and comes back to
-# Android only when the run ends. When a run's end is not reached the phone stays
-# off USB; when it does, the phone is back for a while and then off again (its own
-# init-retry loop). So: wait, and the moment adb answers, run the loader that
-# photographs the panel.
+# Android only when the run ends and the loader chains to it. When a run's end was
+# not reached -- the loader was never able to get back, or the watchdog reset into
+# a loop -- the phone stays off USB for good: `adb devices` empty AND `lsusb`
+# showing no MediaTek device at all (not even 18d1:4ee0, which is what a fastbootd
+# phone looks like). That is the case that needs the user's hands: hold the power
+# button and reseat the USB. Do not keep polling it for ten minutes when `lsusb`
+# shows nothing at all -- the zygote-restart case still enumerates, this one does
+# not. Before asking for a power cycle, check that no `fastboot`/`adb` process of
+# yours is still running: a flashing command left alive holds the device and
+# looks exactly like a dead phone.
 #
 # usage: tools/phone-shot.sh [SECONDS] [OUT.png]
 set -e
