@@ -495,6 +495,27 @@ with the shared cache, the App cryptex, and the applications of the system image
 applications are already on the phone (the `System` volume of 45044 files that
 the kernel reads as the root), and the shared cache is in it.
 
+## The setup state is right too
+
+The setup assistant is not what is missing, and the state that says so is on the
+phone and installed at every boot.
+
+The tree's small root carries eight preference files under `/var`, and its
+`/etc/var.skel` -- the template `init` fills the empty `/private/var` with --
+has a line for each:
+
+    f  644  501  501  /private/var/mobile/Library/Preferences/com.apple.purplebuddy.plist  /var/mobile/Library/Preferences/com.apple.purplebuddy.plist
+
+and that file says the first-boot setup has been gone through:
+
+    <key>SetupDone</key><true/>
+    <key>SetupVersion</key><integer>11</integer>
+    <key>SetupState</key><string>SetupUsingAssistant</string>
+    <key>ForceNoBuddy</key><true/>
+
+Our run's log says they are installed: "111 directories, 8 files" -- the
+skeleton's directories and its eight files, the purplebuddy one among them.
+
 ## The Setup Assistant
 
 The tree refuses it deliberately: `userland/src/inject_sb.c` replaces
@@ -587,6 +608,35 @@ kernel's own driver prints nothing at all).
   dismissed or when the startup has finished, and it refuses to be dismissed
   while the system app sustains it. The tree's board reaches the home screen
   without anything about it, so the difference is somewhere in what we do.
+
+## The UFS controller's address, and what it cost
+
+The source-built kernel would not boot: it hung at the jump and the storage died
+forty-eight seconds in.
+
+    ufs: the loader offers no area for a list (or not one as expected: controller
+         11270000, area 80210000 of 69632, command descriptors at 4096 of 2048)
+
+The kernel compares the loader's numbers with its own, and one of them did not
+match. The tree's kernel says:
+
+    #define UFSHC_PHYS  0x1d84000ULL   /* ufshc@1d84000, "ufs_mem", in the phone's
+                                        Android device tree */
+
+That comment is false. `0x1d84000` is the reference board's Qualcomm
+controller. This phone's own device tree has the controller elsewhere, and
+`0x1d84000` is nowhere in it:
+
+    /soc/ufshci@11270000 reg = 0x11270000 size 0x2300
+        compatible = mediatek,mt8183-ufshci
+
+The address is `0x11270000`, the loader's is `0x11270000`, and the phone's is
+`0x11270000`. Only the kernel's constant was wrong, and because the kernel
+asked the loader for a list under a rule the loader did not match, it refused
+the loader's own list -- and with it the storage. The kernel then ran with no
+file system at all: one process, no `launchd`, no SpringBoard.
+
+Fixed to `0x11270000`.
 
 ## The one thing that is missing, in one paragraph
 
