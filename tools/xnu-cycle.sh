@@ -11,7 +11,7 @@ OUT=${XNU_LOG_OUT:-$ROOT/logs/xnu-last.log}
 SECS=${XNU_SECS:-45}
 # XNU_ARGS: the kernel's own command line (cores and so on); the clock comes from this machine
 # touchscreen=1: the kernel's touch driver (kernel/bsd/dev/hakios.ft3681.c) starts only with it
-XNU_ARGS=${XNU_ARGS:-cpus=1 touchscreen=1}
+XNU_ARGS=${XNU_ARGS:-cpus=1 touchscreen=1 gl=1}
 # the device tree offers the kernel exactly this many cores; "cpus=" in XNU_ARGS should match
 CORES=${XNU_CORES:-$(expr "$XNU_ARGS" : '.*cpus=\([0-9]*\)' || echo 1)}
 [ -n "$CORES" ] || CORES=1
