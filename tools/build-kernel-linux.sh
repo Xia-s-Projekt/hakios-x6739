@@ -41,6 +41,13 @@ if [ ! -f "$XNU_SRC/makedefs/MakeInc.def" ]; then
 fi
 
 log=${KERNEL_LOG:-../refs/kernel-build.log}
+
+# The drivers this phone's kernel is built with: this repository's own choice
+# (configs/x6739.config -- the tree's touch driver is for the POCO's SPI chip, not this phone's
+# I2C0 FocalTech FT3681). Without this the tree builds every driver it knows, goodix included.
+CONFIG=${HAKIOS_CONFIG:-$HERE/configs/x6739.config}
+(cd "$COMMON" && python3 tools/hakios-config.py kernel --tree "$XNU_SRC" --config "$CONFIG")
+
 # make exits 2 on this configuration (the kext symbol-set steps, see the head of this file):
 # the kernel is built anyway, so the exit status is not what decides here
 (cd "$COMMON" && bash xnu-build.sh -k -j$JOBS "$@") >"$log" 2>&1 || true
