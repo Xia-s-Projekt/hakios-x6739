@@ -38,10 +38,27 @@ measured 192 by 240. The difference is the 8-pixel granularity of the reading.
 The root filesystem carries the logo for the progress UI as well:
 `sysimage/rootfs/usr/share/progressui/applelogo@3x.tga`.
 
-The picture on the panel is not the same in every run, which says the boot UI is
-live and being redrawn: the 70-second run (`glq.log`) shows a small shape of 20
-lit cells in 3 rows, and the 100-second runs (`wp2.log`, `gl-test.log`) show the
-full logo -- 260 lit cells in 14 rows, 23 cells wide.
+Three runs, and the panel's picture in two of them is the same shape in the same
+place:
+
+| run | kernel time | lit cells | rows | the shape |
+| --- | --- | --- | --- | --- |
+| `glq.log` | 25.9 - 92.9 s | 20 | 3 | a small blob, 48 x 64 px at x = 512 |
+| `wp3.log` | 25.9 - 67.3 s | 260 | 14 | the logo, 192 x 240 px at x = 448 |
+| `wp2.log` | 25.9 - 125.9 s | 260 | 14 | the logo, 192 x 240 px at x = 448 |
+
+The 45-second and the 100-second run give byte-identical shapes (the same 14
+rows, the same columns), so the logo is not animating -- it is simply there. The
+70-second run's blob is something else, and the boot UI has two forms
+(`Current bootUI is an Apple Logo` and `Current bootUI is the spinny, level %@`),
+so that run was showing the spinner and the others the logo. Which of the two is
+up is a matter of the boot's progress, not of the time.
+
+The logo's size settles which image it is: `ProgressUI.framework` carries
+`apple-logo@2x~iphone.png` (129 x 158), `apple-logo@3x~iphone.png` (194 x 237),
+`apple-logo-d3x` and `-d5x` and `-n84` (450 x 450 and 300 x 300). At our scale
+of 3, the @3x one is the one that fits: 194 * 1080/1125 = 186 by 228, and the
+loader measures 192 by 240.
 
 It is not the kernel's or the loader's: it is Darwin's own boot UI overlay, drawn
 by `backboardd` once user space is up. `usr/libexec/backboardd` has the strings
