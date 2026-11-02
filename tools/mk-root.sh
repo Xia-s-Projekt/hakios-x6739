@@ -55,8 +55,20 @@ fi
 # either. With nsurlsessiond and cloudd in, the same run reaches 112 processes and 15 widget and
 # poster processes, PosterBoard among them.
 if [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
+	# --rest adds the launch angels: the applications without an icon that draw parts of the
+	# system's own interface in a process of their own -- the wallpaper (PosterBoard, PaperBoard),
+	# the keyboard, the now playing controls. They are reached through a Mach service like a
+	# daemon, and only when a program asks for one, so the tree takes out what would start them
+	# by itself (RunAtLoad, KeepAlive). Without them there is no wallpaper: the phone's log says
+	# "CoreAnimation: Failed to initialize Metal or OpenGLES contexts!" and the screen shows the
+	# dock over nothing.
+	#
+	# The daemons the home screen waits for are named in the tree's notes (docs/ru/notes.md):
+	# cloudd asks com.apple.nsurlsessiond thousands of times a session, nsurlsessiond is not in the
+	# image, and the home screen and every widget and poster never come up. ALLOW lets those
+	# through the tree's own DENY list.
 	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored" \
-		python3 mkjobs.py ../sysimage/rootfs "$ROOT/build-root/LaunchDaemons" \
+		python3 mkjobs.py --rest ../sysimage/rootfs "$ROOT/build-root/LaunchDaemons" \
 		com.apple.notifyd com.apple.logd com.apple.containermanagerd com.apple.containermanagerd.system \
 		com.apple.runningboardd com.apple.backboardd com.apple.mobile.usermanagerd com.apple.lsd \
 		com.apple.iconservices.iconservicesagent com.apple.pluginkit.pkd com.apple.SpringBoard \
