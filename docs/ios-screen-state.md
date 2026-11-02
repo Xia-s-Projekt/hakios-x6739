@@ -579,8 +579,23 @@ kernel's own driver prints nothing at all).
   -- before XNU runs and when it comes back (`mtkloader/mtkloader.c`,
   `shot_panel`) -- in the form `tools/fbshot.py` makes a PNG of; the next run
   shows it.
-- Whether a run long enough reaches the home screen. The tree's own numbers say
-  minutes, not the 70 s the runs so far had; `tools/long-boot.sh` does a longer
-  one with more cores.
 - Nothing has been tried on the lock screen, the notification center, the control
-  center or the setup assistant.
+  center or the setup assistant. The lock screen is behind the boot logo, and the
+  tree's own `inject_sb.c` dismisses it ten seconds after SpringBoard's run loop
+  starts.
+- What dismisses the boot logo. The overlay goes away when it is explicitly
+  dismissed or when the startup has finished, and it refuses to be dismissed
+  while the system app sustains it. The tree's board reaches the home screen
+  without anything about it, so the difference is somewhere in what we do.
+
+## The one thing that is missing, in one paragraph
+
+Everything the tree's board has is here: the system image with 174 applications
+and the shared cache is on the phone's flash and is the root, the software
+renderer draws (the tree's own table says the home screen and the standard
+wallpapers work with it), and the wallpapers are in the image. What is on the
+panel instead is Darwin's boot UI -- the Apple logo, measured at 192 x 240 where
+the image says 186 x 228 -- sustained while the system around it runs. So the
+wallpaper, the lock screen, the notification center and the control center are
+all one problem, and it is that overlay, and it is not a question of time or of
+cores or of the renderer.
