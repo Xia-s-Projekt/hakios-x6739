@@ -28,10 +28,7 @@ python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" \
 	--ramdisk "$ROOT/build-root.apfs" >/dev/null
 python3 "$ROOT/tools/chainboot.py" "$ROOT/backup/boot_a.img" "$ROOT/mtkloader/mtkloader.bin" \
 	"$ROOT/xnu-flashed-slot_a.img" "$ROOT/build-payload.bin" >/dev/null
-[ "$(adb -s $S get-state 2>/dev/null)" = device ] && adb -s $S reboot bootloader
-for i in $(seq 1 120); do fastboot devices | rg -q "$S" && break; sleep 1; done
-# (fastboot -s waits for ever for a phone that is not there: a run would hang for hours)
-fastboot devices | rg -q "$S" || { echo "the phone did not come up in fastboot"; exit 1; }
+"$ROOT/tools/fastboot-bootloader.sh" "$S"
 [ "$(fastboot -s $S getvar current-slot 2>&1 | sed -n 's/^current-slot: //p')" = a ] || { echo "current slot is not a"; exit 1; }
 fastboot -s $S flash boot_a "$ROOT/xnu-flashed-slot_a.img" >/dev/null 2>&1
 fastboot -s $S reboot >/dev/null 2>&1
