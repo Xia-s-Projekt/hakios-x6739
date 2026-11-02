@@ -29,6 +29,9 @@ refs/ios/
 refs/.tmp/
 # python's byte-cache
 __pycache__/
+# the phone-side programs this port builds (tools/build-userland.sh)
+userland/obj/
+build-host/
 .antumbra_state
 # macOS
 .DS_Store
