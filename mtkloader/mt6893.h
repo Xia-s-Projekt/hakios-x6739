@@ -102,10 +102,45 @@ static const uint32_t core_mpidr[CPU_COUNT] = {
 /* The A55s: the first four in the tree's own order. The kernel is told which are the small ones. */
 #define SMALL_CORE_COUNT   4
 
-/* The clocks the kernel is told, in hertz (the tree's own clock-frequency values). */
+/*
+ * The clocks the kernel is told, in hertz: the tree's own clock-frequency values.
+ *
+ *   the A55s      0x77359400 = 2.000 GHz   (/cpus/cpu@000..003)
+ *   the A78s      0x9af8da00 = 2.600 GHz   (/cpus/cpu@100..102)
+ *   the prime     0xb2d05e00 = 3.000 GHz   (/cpus/cpu@200)
+ *
+ * The prime core's 3.000 GHz is the tree's number (opp_table2's top row, 3000 MHz at
+ * 1050 mV). The 2711 MHz that was here before is opp_table2's opp13, not what the tree
+ * says the prime core runs at.
+ */
 #define CPU_CLOCK_LITTLE   2000000000ULL
 #define CPU_CLOCK_BIG      2600000000ULL
-#define CPU_CLOCK_PRIME    2711000000ULL
+#define CPU_CLOCK_PRIME    3000000000ULL
+
+/*
+ * The operating points per cluster, from the tree's own tables (/opp_table0, /opp_table1,
+ * /opp_table2, the operating-points-v2 of the cpu nodes):
+ *
+ *   the A55s   (opp_table0):  500 .. 2000 MHz,  650 .. 1000 mV
+ *   the A78s   (opp_table1):  437 .. 2600 MHz,  650 .. 1050 mV
+ *   the prime  (opp_table2):  659 .. 3000 MHz,  650 .. 1050 mV
+ *
+ * The Android kernel on this phone runs the same three tables: its own log says
+ * "ppm update cpufreq limit ,cluster 1, min freq 437000 ------max freq 2600000" and
+ * "cluster 2, min freq 659000 ------max freq 3000000" (cluster 0 is the A55s), and it
+ * lowers them to 1740/2284 MHz when it wants the phone cooler.
+ */
+#define OPP_LITTLE_MIN_HZ     500000000ULL
+#define OPP_LITTLE_MAX_HZ    2000000000ULL
+#define OPP_BIG_MIN_HZ        437000000ULL
+#define OPP_BIG_MAX_HZ       2600000000ULL
+#define OPP_PRIME_MIN_HZ      659000000ULL
+#define OPP_PRIME_MAX_HZ     3000000000ULL
+
+/* The voltage the top row of each table asks for (opp15 of each): the rail has to be there. */
+#define OPP_LITTLE_MAX_UV   1000000ULL
+#define OPP_BIG_MAX_UV      1050000ULL
+#define OPP_PRIME_MAX_UV    1050000ULL
 
 /* PSCI: the tree says arm,psci-1.0 with method = smc, so the calls go through ATF. */
 #define PSCI_FN_0           0xC4000003u        /* CPU_ON */
@@ -153,6 +188,17 @@ static const uint32_t core_mpidr[CPU_COUNT] = {
 #define UFS_HC_AREA_SIZE    0x11000u
 #define UFS_DATA_BUFFER_PA  0x80230000ULL
 #define UFS_DATA_BUFFER_SIZE (64u * 1024u)
+
+/*
+ * The battery page the kernel's battery driver polls (drivers/power/hakios.battery.c, which is
+ * the Qualcomm port's driver: it reads the cache the loader publishes and nothing else).
+ *
+ * The page sits in the same System RAM the UFS handover buffers use, above the 64 KB data
+ * buffer and clear of it: the kernel maps it with ml_io_map() and reads it every five seconds.
+ * The driver's own page size is 0x4000, so the page starts on a 16 KB boundary.
+ */
+#define BATTERY_PAGE_PA     0x80240000ULL
+#define BATTERY_PAGE_SIZE   0x4000u
 
 /* ---- the display ---- */
 

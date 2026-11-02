@@ -16,10 +16,16 @@ S=${HAKIOS_SERIAL:?set HAKIOS_SERIAL to the serial of your phone, as adb devices
 OUT="${1:-$(cd "$(dirname "$0")" && pwd)}"
 TMP=/data/local/tmp/hakios-fw
 
-# CONNSYS: this board's Wi-Fi/Bluetooth firmware is the soc3_0 generation.
-CONNSYS="soc3_0_patch_mcu_1a_1_hdr.bin soc3_0_ram_mcu_1a_1_hdr.bin soc3_0_ram_wifi_1a_1_hdr.bin
-	soc3_0_ram_bt_1a_1_hdr.bin WIFI_RAM_CODE_soc3_0_1a_1.bin WMT_SOC.cfg wifi.cfg BT_FW.cfg
-	conninfra.cfg"
+# CONNSYS: this board's Wi-Fi/Bluetooth firmware is the soc3_0 generation (the reference
+# board's was soc1_0). The list is what the phone is known to have (docs/mt6893-facts.md)
+# plus the files already in fw-connsys/ that the list was missing (the "wmmcu" pair: the
+# multimedia MCU's RAM code and its patch). The pull is a copy, so a name that is not on
+# the phone is skipped without an error.
+CONNSYS="soc3_0_patch_mcu_1a_1_hdr.bin soc3_0_patch_wmmcu_1a_1_hdr.bin
+	soc3_0_ram_mcu_1a_1_hdr.bin soc3_0_ram_mcu_1_1_hdr.bin soc3_0_ram_mcu_e1_hdr.bin
+	soc3_0_ram_wmmcu_1a_1_hdr.bin soc3_0_ram_wifi_1a_1_hdr.bin
+	soc3_0_ram_bt_1a_1_hdr.bin soc3_0_ram_bt_1_1_hdr.bin WIFI_RAM_CODE_soc3_0_1a_1.bin
+	WMT_SOC.cfg wifi.cfg BT_FW.cfg conninfra.cfg"
 
 # The touch controller's firmware: FocalTech on this phone, not the reference board's OmniVision.
 TOUCH=focaltech_ts_fw_00.bin

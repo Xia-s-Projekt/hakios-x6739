@@ -140,7 +140,7 @@ if [ "$REBUILD" -eq 1 ]; then
 	python3 "$ROOT/tools/chainboot.py" "$ROOT/backup/boot_a.img" "$ROOT/mtkloader/mtkloader.bin" "$IMG" "$ROOT/build-payload.bin" >/dev/null
 
 	echo "Arming one-shot HakiOS boot flag..."
-	adb -s "$SERIAL" shell 'su -c "printf DARWIN-X6739:BOOT-XNU > /dev/pmsg0"'
+	"$ROOT/tools/batt-request.sh"
 
 	echo "Flashing boot_a and booting HakiOS directly..."
 	adb -s "$SERIAL" reboot bootloader
@@ -153,7 +153,7 @@ if [ "$REBUILD" -eq 1 ]; then
 fi
 
 echo "Arming one-shot HakiOS boot flag..."
-adb -s "$SERIAL" shell 'su -c "printf DARWIN-X6739:BOOT-XNU > /dev/pmsg0"'
+"$ROOT/tools/batt-request.sh"
 echo "Rebooting into HakiOS..."
 adb -s "$SERIAL" reboot
 echo "Device is rebooting into HakiOS (iOS 16.5)."

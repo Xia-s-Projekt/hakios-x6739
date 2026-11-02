@@ -74,11 +74,15 @@
  * A watcher on a core the kernel wants is worse than none: PSCI CPU_ON answers "already on", the
  * kernel counts a processor that never checks in, and every rendezvous between cores waits for
  * it -- which is how a 15 minute run stayed on the Apple logo.
+ *
+ * So eight cores for the kernel means no core for the watcher: the rescue thread then has
+ * nowhere to run and is not started (watcher_start()). What still ends a run is XNU's own
+ * return to the loader (loader_return_after=) and the watchdog (XNU_WDT_SECONDS).
  */
 #ifndef XNU_CORES
-#define XNU_CORES           4
+#define XNU_CORES           8
 #endif
-_Static_assert(XNU_CORES >= 1 && XNU_CORES <= 7, "one core at least, and one left for the watcher");
+_Static_assert(XNU_CORES >= 1 && XNU_CORES <= CPU_COUNT, "as many cores as the phone has");
 
 /*
  * The processors in the order the kernel is offered them: the one this code runs on first (LK
@@ -113,6 +117,13 @@ static const uint8_t core_order[CPU_COUNT] = {
 #define XNU_RETURN_AFTER    "0"
 #endif
 /* 1: always start XNU (tools/xnu-cycle.sh); 0: Android unless asked once (tools/boot-xnu.sh). */
+/*
+ * How many touch report frames the loader reads before it gives up waiting for a point, 10 ms
+ * apart. Set it high for a run whose point has to be caught by hand.
+ */
+#ifndef TOUCH_REPORT_TRIES
+#define TOUCH_REPORT_TRIES   1000
+#endif
 /* 1: look at the touch screen's SPI and report, then go back to Android (no XNU). */
 #ifndef TOUCH_PROBE
 #define TOUCH_PROBE         0
@@ -432,7 +443,23 @@ static void out_dec(uint64_t v)
 	}
 }
 
-#include "mtkconnsys.h"         /* Wi-Fi step 1: Android's device tree on CONNSYS, printed (uses out()) */
+/* The hex digits of v, into the command line at *d (the boot-args' addresses are written out). */
+static void cmdline_hex(uint32_t *d, uint64_t v)
+{
+	static const char hex[] = "0123456789abcdef";
+	int i = 60;
+
+	while (i > 0 && !((v >> i) & 0xf)) {
+		i -= 4;
+	}
+	for (; i >= 0; i -= 4) {
+		if (*d + 1 < sizeof(runtime_cmdline)) {
+			runtime_cmdline[(*d)++] = hex[(v >> i) & 0xf];
+		}
+	}
+}
+
+#include "mtkconnsys_probe.h"   /* Wi-Fi step 1: the phone's tree on CONNSYS and the state of the domain */
 #include "mtki2c.h"
 #include "mt6360.h"
 
@@ -715,6 +742,107 @@ static void ufs_setup_shared(void)
 	out(", 3 parts, native area ");
 	out_hex(UFS_HC_AREA_PA);
 	out("\n");
+}
+
+/*
+ * The battery state, in the shape the kernel's battery driver wants it
+ * (drivers/power/hakios.battery.c: the Qualcomm port's driver, which reads the cache the loader
+ * publishes and nothing else).
+ *
+ * The numbers come from the phone's own gauge, read under Android when the XNU boot is asked
+ * for and carried over in the request (the power supply class; see tools/boot-xnu.sh). The driver
+ * wants them in a page of their own, at an address it is told on the command line, and it reads
+ * that page with ml_io_map(): a whole 16 KB page, its own, in RAM nothing else uses.
+ *
+ * The values are the ones the gauge reported when the boot was asked for: the loader is handed
+ * over to XNU and does not run again, so the page holds one reading. Android reads the same
+ * gauge, so the reading is the phone's own.
+ */
+#define LOADER_BATTERY_MAGIC           0x2154544142574452ULL /* "RDWBATT!" */
+#define LOADER_BATTERY_VERSION         1
+#define LOADER_BATTERY_VALID           (1u << 0)
+#define LOADER_BATTERY_PRESENT         (1u << 1)
+#define LOADER_BATTERY_CHARGER_PRESENT (1u << 2)
+#define LOADER_BATTERY_VOLTAGE_VALID   (1u << 3)
+#define LOADER_BATTERY_CHARGING        (1u << 4)
+#define LOADER_BATTERY_SOC_ESTIMATED   (1u << 5)
+
+struct loader_battery {
+	uint64_t magic;
+	uint32_t version, size;
+	volatile uint32_t sequence;
+	uint32_t flags;
+	int32_t soc_percent, voltage_mv, current_ma, temperature_c;
+	uint32_t charger_action, polls, failures, reserved;
+};
+
+/*
+ * What the request said about the battery: soc, voltage (mV), current (mA, positive while the
+ * battery takes charge), temperature (C), status and whether a charger is attached. -1 (or -273)
+ * is "not known"; the status is the power supply class's (1 charging, 2 discharging,
+ * 3 not charging, 4 full).
+ */
+static int batt_soc = -1, batt_mv = -1, batt_ma = 0, batt_tc = -273, batt_status = 0, batt_online = 0;
+
+/* Whether a reading was published: the kernel is told about the page only then. */
+static int battery_published;
+
+/*
+ * Publish the battery state where the kernel's driver will look for it. True when a reading
+ * worth publishing came in the request: without one the page is left alone and the kernel is
+ * not told about it, so the driver stays out of the way and the percentage stays unknown.
+ */
+static int battery_publish(void)
+{
+	volatile struct loader_battery *b = (volatile struct loader_battery *)(uintptr_t)BATTERY_PAGE_PA;
+	uint32_t flags;
+
+	if (batt_soc < 0 || batt_soc > 100) {
+		out("battery: no reading in the request\n");
+		return 0;
+	}
+	flags = LOADER_BATTERY_VALID | LOADER_BATTERY_PRESENT;
+
+	if (batt_mv >= 0) {
+		flags |= LOADER_BATTERY_VOLTAGE_VALID;
+	}
+	if (batt_online) {
+		flags |= LOADER_BATTERY_CHARGER_PRESENT;
+	}
+	if (batt_status == 1 && batt_soc < 100) {   /* POWER_SUPPLY_STATUS_CHARGING, and not yet full */
+		flags |= LOADER_BATTERY_CHARGING;
+	}
+
+	memset((void *)b, 0, sizeof(*b));
+	b->magic = LOADER_BATTERY_MAGIC;
+	b->version = LOADER_BATTERY_VERSION;
+	b->size = sizeof(struct loader_battery);
+	b->flags = flags;
+	b->soc_percent = batt_soc;
+	b->voltage_mv = batt_mv;
+	b->current_ma = batt_ma;
+	b->temperature_c = batt_tc;
+	b->charger_action = batt_status;
+	b->sequence = 2;               /* even: the driver reads the page as settled */
+	dcache_clean_range(BATTERY_PAGE_PA, sizeof(struct loader_battery));
+
+	out("battery: published at ");
+	out_hex(BATTERY_PAGE_PA);
+	out(", SOC ");
+	out_dec((uint64_t)batt_soc);
+	out("%, V ");
+	out_dec((uint64_t)batt_mv);
+	out(" mV, I ");
+	out_dec((uint64_t)batt_ma);
+	out(" mA, T ");
+	out_dec((uint64_t)batt_tc);
+	out(" C, status ");
+	out_dec((uint64_t)batt_status);
+	out(", charger ");
+	out_dec((uint64_t)batt_online);
+	out("\n");
+	battery_published = 1;
+	return 1;
 }
 
 /* Opaque pixels only from here on: XNU's console writes alpha 0. */
@@ -2286,9 +2414,39 @@ static uint8_t touch_bring_up_once(void)
 #endif
 
 /*
+ * The touch report, as the phone's own driver reads it: write 0x01, then read 62 bytes. Byte 1's
+ * high nibble is the report type and its low nibble the number of points, and the point block
+ * starts at byte 2, six bytes a point:
+ *
+ *   b0: bits 7.6 = event (2 = contact), bits 3.0 = x[15:12]
+ *   b1: x[11:4]
+ *   b2: bits 7.4 = finger id, bits 3.0 = y[15:12]
+ *   b3: y[11:4]
+ *   b4: bits 7.4 = x[3:0], bits 3.0 = y[3:0]
+ *   b5: area
+ *
+ * so x = ((b0 & 0x0f) << 12) | (b1 << 4) | (b4 >> 4) and y = ((b2 & 0x0f) << 12) | (b3 << 4) |
+ * (b4 & 0x0f). The coordinates are the panel's 1080 x 2400 in sixteenths of a pixel.
+ */
+static void fts_say_point(const struct fts_point *p)
+{
+	out("    point id=");
+	out_hex(p->id);
+	out(" event=");
+	out_hex(p->event);
+	out(" x=");
+	out_dec(p->x);
+	out(" y=");
+	out_dec(p->y);
+	out(" area=");
+	out_dec(p->area);
+	out("\n");
+}
+
+/*
  * The whole sequence, up to six times, waiting a little longer between tries each time. Now and then the chip takes the image and then says
  * nothing after the go command -- two runs in four did -- and a fresh start from a reset brings
- * it up; this was what left iOS without a touch screen.
+ * it up; this is what left iOS without a touch screen.
  *
  * MT6893: the reference board's touch is an OmniVision TD4160, a TCM controller on SPI2. This
  * board's is a FocalTech FT3681 on I2C0 (see docs/touchscreen-ft3681.md). The path below probes
@@ -2360,21 +2518,86 @@ static uint8_t touch_bring_up(void)
 	}
 	out("\n");
 
-	{
-		uint8_t reg = FTS_REG_DEV_MODE, report[63];
-		int r_dma = mtk_i2c0_write_read(FTS_SLAVE_ADDR, &reg, 1, report, sizeof(report));
-		out("touch: 63-byte report over DMA ");
-		if (r_dma == 0) {
-			out("ok, mode=");
-			out_hex(report[0]);
-			out(" points=");
-			out_dec(report[2] & 0x0fu);
-		} else {
-			out("FAIL(err=");
-			out_dec((uint32_t)-r_dma);
-			out(")");
+	/*
+	 * The report, as the phone's own driver reads it: write 0x01, then read 62 bytes. The panel
+	 * answers with 0xff in every byte when it has nothing to say -- the phone's own driver calls
+	 * that "touch buff is 0xff, need recovery state" -- so the frame is read again and again until
+	 * one carries a point. TOUCH_REPORT_TRIES frames, 10 ms apart.
+	 */
+	uint32_t tries = 0;
+
+	/* what each candidate register holds, so the report register can be identified */
+	for (uint32_t reg = 0; reg < 4; reg++) {
+		uint8_t r = (uint8_t)reg;
+		uint8_t report[FTS_REPORT_LEN];
+
+		if (mtk_i2c0_write_read(FTS_SLAVE_ADDR, &r, 1, report, sizeof(report)) != 0) {
+			out("touch: read of register 0x");
+			out_hex(r);
+			out(" failed\n");
+			continue;
 		}
+		out("touch: register 0x");
+		out_hex(r);
+		out(": ");
+		for (uint32_t i = 0; i < 8; i++) {
+			out_hex(report[i]);
+			out(" ");
+		}
+		out(fts_report_is_idle(report) ? " (all 0xff)\n" : "\n");
+	}
+
+	/* the long read itself: the chip id register holds 0x56, so the first byte must come back */
+	{
+		uint8_t r = FTS_REG_CHIP_ID_H;
+		uint8_t report[FTS_REPORT_LEN];
+
+		if (mtk_i2c0_write_read(FTS_SLAVE_ADDR, &r, 1, report, sizeof(report)) == 0) {
+			out("touch: 62-byte read of the chip id register: ");
+			for (uint32_t i = 0; i < 4; i++) {
+				out_hex(report[i]);
+				out(" ");
+			}
+			out(report[0] == 0x56 ? "(the long read works)\n" : "(the long read does not work)\n");
+		} else {
+			out("touch: the long read of the chip id register failed\n");
+		}
+	}
+
+	for (tries = 0; tries < TOUCH_REPORT_TRIES; tries++) {
+		uint8_t reg = FTS_REG_REPORT;
+		uint8_t report[FTS_REPORT_LEN];
+		struct fts_point pts[FTS_MAX_POINTS];
+		uint32_t n;
+
+		if (mtk_i2c0_write_read(FTS_SLAVE_ADDR, &reg, 1, report, sizeof(report)) != 0) {
+			out("touch: 62-byte report over DMA FAIL\n");
+			break;
+		}
+		if (fts_report_is_idle(report)) {
+			dbg_delay_ms(10);
+			continue;
+		}
+		n = fts_decode_report(report, pts, FTS_MAX_POINTS);
+		out("touch: 62-byte report over DMA ok, type=");
+		out_hex(fts_report_type(report));
+		out(" count=");
+		out_dec(fts_report_count(report));
+		out(" points=");
+		out_dec(n);
 		out("\n");
+		for (uint32_t i = 0; i < n; i++) {
+			fts_say_point(&pts[i]);
+		}
+		if (n > 0) {
+			break;
+		}
+		dbg_delay_ms(10);
+	}
+	if (tries == TOUCH_REPORT_TRIES) {
+		out("touch: no point in ");
+		out_dec(tries);
+		out(" report frames (the panel said 0xff every time)\n");
 	}
 
 	if (r_h == 0 && r_l == 0 && chip_h == 0x56 && chip_l == 0x62) {
@@ -2615,6 +2838,12 @@ static void __attribute__((noreturn)) run_xnu(void)
 	ba->video.v_height = PANEL_H;
 	ba->video.v_depth = 32;
 
+	/*
+	 * The battery state, if the request carried a reading: published before the command line
+	 * is assembled, because the kernel is told about the page only when there is one.
+	 */
+	battery_publish();
+
 	/* Assemble command line, merging runtime dynamic overrides if present */
 	{
 		uint32_t active_cpus = (runtime_cpus >= 1 && runtime_cpus <= 7) ? runtime_cpus : 0;
@@ -2711,6 +2940,18 @@ static void __attribute__((noreturn)) run_xnu(void)
 			if (d && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = ' ';
 			const char *ex = runtime_extra_args;
 			while (*ex && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = *ex++;
+		}
+		/*
+		 * The battery page: the kernel's battery driver polls it every five seconds and reads
+		 * it at the address it is told here (drivers/power/hakios.battery.c). It is only told
+		 * about a page that holds a reading: a page without one would be read as a cache the
+		 * loader never wrote.
+		 */
+		if (battery_published) {
+			if (d && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = ' ';
+			const char *pre = "battery=1 battery_shared_pa=0x";
+			while (*pre && d + 1 < sizeof(runtime_cmdline)) runtime_cmdline[d++] = *pre++;
+			cmdline_hex(&d, BATTERY_PAGE_PA);
 		}
 		runtime_cmdline[d] = '\0';
 	}
@@ -3464,6 +3705,45 @@ static int pmsg_take(const char *flag, uint32_t n)
 							runtime_extra_args[i] = d[cur + 6 + i];
 						}
 						runtime_extra_args[elen] = '\0';
+					} else if (param_len >= 5 && d[cur] == 'b' && d[cur+1] == 'a' && d[cur+2] == 't' &&
+					           d[cur+3] == 't' && d[cur+4] == '=') {
+						/*
+						 * batt=soc,mv,ma,tc,status,online: the phone's gauge, read under Android
+						 * when this boot was asked for (tools/batt-request.sh). The current is
+						 * the one that takes charge, positive while charging.
+						 */
+						int vals[6];
+						uint32_t vi = 0;
+						uint32_t i = cur + 5;
+
+						while (vi < 6 && i < next) {
+							int sign = 1, v = 0, digits = 0;
+
+							if (d[i] == '-') {
+								sign = -1;
+								i++;
+							}
+							while (i < next && d[i] >= '0' && d[i] <= '9') {
+								v = v * 10 + (d[i] - '0');
+								i++;
+								digits++;
+							}
+							if (!digits) {
+								break;
+							}
+							vals[vi++] = sign * v;
+							if (i < next && d[i] == ',') {
+								i++;
+							}
+						}
+						if (vi == 6) {
+							batt_soc = vals[0];
+							batt_mv = vals[1];
+							batt_ma = vals[2];
+							batt_tc = vals[3];
+							batt_status = vals[4];
+							batt_online = vals[5];
+						}
 					}
 					cur = next + 1;
 				}
@@ -3917,6 +4197,7 @@ void mtkloader_main(uint64_t dtb)
 	display_report();
 	ufs_probe();
 	ufs_setup_shared();
-	connsys_dt_report(dtb);         /* Wi-Fi step 1: what Android's tree says of CONNSYS (mtkconnsys.h) */
+	mt6893_connsys_dt_report(dtb);  /* Wi-Fi step 1: the phone's tree on CONNSYS */
+	mt6893_connsys_state();          /* Wi-Fi step 1: the state of the conn_infra domain (read only) */
 	run_xnu();
 }

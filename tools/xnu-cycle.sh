@@ -22,13 +22,10 @@ TEST_FLAGS=(-DXNU_WDT_SECONDS=0 -DXNU_CORES=$CORES -DXNU_WATCH_SECONDS=$WATCH
 "$ROOT/mtkloader/build.sh" "${TEST_FLAGS[@]}" "$@" >/dev/null
 # the payload (the XNU kernel and the small root) and the flashable image
 COMMON=${HAKIOS_COMMON:-$(cd "$ROOT/.." && pwd)/refs/hakios-xnu-kernel}
-rm -rf "$ROOT/build-root"
-cp -a "$COMMON/userland/root" "$ROOT/build-root"
-ln -sf init "$ROOT/build-root/sbin/launchd"
-ln -sf private/var/tmp "$ROOT/build-root/tmp"
-python3 "$COMMON/tools/apfs/mkapfs.py" -z --plain fw -o "$ROOT/build-root.apfs" "redwood=$ROOT/build-root" >/dev/null
-rm -rf "$ROOT/build-root"
-python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" --ramdisk "$ROOT/build-root.apfs" >/dev/null
+bash "$ROOT/tools/mk-root.sh"
+python3 "$ROOT/tools/mkpayload.py" -o "$ROOT/build-payload.bin" \
+	--kernel "${XNU_KERNEL:-$ROOT/mach.development.mt6893}" \
+	--ramdisk "$ROOT/build-root.apfs" >/dev/null
 python3 "$ROOT/tools/chainboot.py" "$ROOT/backup/boot_a.img" "$ROOT/mtkloader/mtkloader.bin" \
 	"$ROOT/xnu-flashed-slot_a.img" "$ROOT/build-payload.bin" >/dev/null
 [ "$(adb -s $S get-state 2>/dev/null)" = device ] && adb -s $S reboot bootloader
