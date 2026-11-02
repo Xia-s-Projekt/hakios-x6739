@@ -27,7 +27,9 @@ KERNEL=${XNU_KERNEL:-$ROOT/mach.development.mt6893}
 # how long the kernel runs before it hands the log back
 SECS=${XNU_SECS:-120}
 # the kernel's own command line; the clock comes from this machine
-XNU_ARGS=${XNU_ARGS:-"cpus=4 fb_diff=1"}
+# touchscreen=1: the kernel's touch driver. The tree's driver for the phone's FocalTech FT3681
+# (kernel/bsd/dev/hakios.ft3681.c) starts only with this argument.
+XNU_ARGS=${XNU_ARGS:-"cpus=4 fb_diff=1 touchscreen=1"}
 # the device tree offers the kernel exactly this many cores; "cpus=" in XNU_ARGS should match
 CORES=${XNU_CORES:-$(expr "$XNU_ARGS" : '.*cpus=\([0-9]*\)' || echo 1)}
 [ -n "$CORES" ] || CORES=1
