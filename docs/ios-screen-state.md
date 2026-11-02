@@ -81,6 +81,13 @@ renderer draws a frame in 28461 us (114 frames in 5008 ms, 22 a second), and the
 run uses one core (`cpus=1`). The tree's notes say the software renderer manages
 15 to 40 frames a second on four cores.
 
+## The lock screen is a different thing, and the tree already handles it
+
+`userland/src/inject_sb.c` dismisses the lock screen forcibly ten seconds after
+SpringBoard's run loop starts (`unlock()`, at `inject_sb.c:1581`), unless
+`autounlock=0` is among the kernel's arguments. So the lock screen is not what
+is missing; it is behind the boot logo.
+
 ## What the log keeps, and what it drops
 
 The loader keeps the first 256 KB and the last megabyte of XNU's log and drops
@@ -105,11 +112,6 @@ beginning was evicted. Two ways to see the early boot are a short run with
 `HAKIOS_QUIET_JOBS=1` (the quiet jobs are already on by default), and the
 loader photographs the panel before XNU runs, so what was on it before the boot
 is not lost either.
-
-The lock screen is a different thing and the tree already handles it:
-`userland/src/inject_sb.c` dismisses it forcibly ten seconds after SpringBoard's
-run loop starts (`unlock()`, at `inject_sb.c:1581`), unless `autounlock=0` is
-among the kernel's arguments.
 
 ## The wallpaper cannot be drawn, because there is nowhere to keep it
 
@@ -231,16 +233,21 @@ readable from user space.
 
 So the command goes the way the tree's own runtime parameters go
 (`tools/ios-cmd.sh`, `userland/hakios-cmd.c`, `tools/batt-request.sh`'s
-`HAKIOS_REQUEST_EXTRA`). What the command prints is the hard part: the phone's
-console is a ring of 256 KB and the running system fills it, so the program waits
-until the end of the run (`loader_return_after=`) and prints then.
+`HAKIOS_REQUEST_EXTRA`). What the command prints is the hard part: the running
+system fills the console, and the loader keeps only the first 256 KB and the last
+megabyte of it (see above), so the program waits until the end of the run
+(`loader_return_after=`) and prints then.
 
 ## What is left to prove
 
 - The command's output has never come back. The transport is proven (the `cmd=`
   reaches the kernel's bootargs) but the output path is not.
-- The panel has never been seen as a picture. The loader photographs it now
-  (`mtkloader/mtkloader.c`, `shot_panel`), in the form `tools/fbshot.py` makes a
-  PNG of; the next run shows it.
+- The panel has never been seen as a picture. The loader photographs it now, twice
+  -- before XNU runs and when it comes back (`mtkloader/mtkloader.c`,
+  `shot_panel`) -- in the form `tools/fbshot.py` makes a PNG of; the next run
+  shows it.
+- Whether a run long enough reaches the home screen. The tree's own numbers say
+  minutes, not the 70 s the runs so far had; `tools/long-boot.sh` does a longer
+  one with more cores.
 - Nothing has been tried on the lock screen, the notification center, the control
   center or the setup assistant.
