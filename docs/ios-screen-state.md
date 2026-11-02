@@ -126,7 +126,10 @@ The tree has all of this for its reference board, and the pieces are:
 
 The reference board (`redwood`, the POCO X5 Pro) reaches the home screen with
 this: its `device.conf` says "storage works UFS read through the loader;
-/ /private/var kept with var_store=1 ufs_write=1".
+/ /private/var kept with var_store=1 ufs_write=1". So the same code, the same
+Darwin user space, the same boot UI overlay -- and the difference between a home
+screen and a standing Apple logo is that one board keeps `/private/var` and the
+other does not.
 
 Note what the carve costs: it takes the partition off Android's userdata, so
 Android's own data area shrinks. That is a change to the phone's storage and
