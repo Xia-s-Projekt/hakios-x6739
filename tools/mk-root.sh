@@ -54,7 +54,7 @@ fi
 # nsurlsessiond is not in the image, so the home screen never appears and no widget or poster does
 # either. With nsurlsessiond and cloudd in, the same run reaches 112 processes and 15 widget and
 # poster processes, PosterBoard among them.
-if [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
+if [ "${HAKIOS_QUIET_JOBS:-0}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
 	# --rest adds the launch angels: the applications without an icon that draw parts of the
 	# system's own interface in a process of their own -- the wallpaper (PosterBoard, PaperBoard),
 	# the keyboard, the now playing controls. They are reached through a Mach service like a
@@ -64,10 +64,20 @@ if [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
 	# dock over nothing.
 	#
 	# The daemons the home screen waits for are named in the tree's notes (docs/ru/notes.md):
-	# cloudd asks com.apple.nsurlsessiond thousands of times a session, nsurlsessiond is not in the
-	# image, and the home screen and every widget and poster never come up. ALLOW lets those
+	# cloudd asks com.apple.nsurlsessiond thousands of times a session, nsurlsessiond is not in
+	# the image, and the home screen and every widget and poster never come up. ALLOW lets those
 	# through the tree's own DENY list.
+	#
+	# OSLOG=com.apple.backboardd: the window server's own os_log output goes to the console.
+	# That is where it says what it believes the screen is ("initial main screen size:{1125,
+	# 2436} scale:2"), which is the one place the scale of the display can be read from.
+	#
+	# HAKIOS_QUIET_JOBS=1 leaves the tree's own smaller set of jobs in the image instead. The
+	# phone's console drops lines when there is a lot of output on it, and the window server's
+	# own line about the screen is early in the run: with the whole job set going, it is gone
+	# before the log comes back.
 	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored" \
+		OSLOG="com.apple.backboardd" \
 		python3 mkjobs.py --rest ../sysimage/rootfs "$ROOT/build-root/LaunchDaemons" \
 		com.apple.notifyd com.apple.logd com.apple.containermanagerd com.apple.containermanagerd.system \
 		com.apple.runningboardd com.apple.backboardd com.apple.mobile.usermanagerd com.apple.lsd \
@@ -94,7 +104,11 @@ b[0x369c:0x36a0] = bytes.fromhex('2001f837')
 b[0x36a4:0x36c8] = bytes.fromhex('21008052a7050094e00319aa41008052a4050094e00319aa8d050094e06f40f92e000014')
 open(p, 'wb').write(b)
 "
-python3 -c "
+# SpringBoard's own os_log output goes to the console only when asked for: it says a megabyte
+# in half a minute, and the phone's console drops lines, so it pushes everything else out of
+# the log that comes back -- the window server's own line about the screen among it.
+if [ "${HAKIOS_SB_OSLOG:-0}" = 1 ]; then
+	python3 -c "
 import plistlib
 p = '$ROOT/build-root/LaunchDaemons/com.apple.SpringBoard.plist'
 pl = plistlib.load(open(p, 'rb'))
@@ -103,7 +117,45 @@ env['OS_ACTIVITY_DT_MODE'] = 'YES'
 env['OS_ACTIVITY_MODE'] = 'debug'
 plistlib.dump(pl, open(p, 'wb'))
 "
+fi
+# A job of its own for the screen's own numbers. The job runner (etc/rc.jobs) cannot show
+# them: init's patch sends its own standard output to /dev/null when etc/quiet is there,
+# and the phone's console drops lines anyway. A launch job with the console as its
+# standard output is what the tree does for its daemons.
+python3 -c "
+import plistlib
+plistlib.dump({
+    'Label': 'com.hakios.mgscreen',
+    'ProgramArguments': ['/redwood/bin/mg_test', 'main-screen-scale', 'main-screen-width',
+                         'main-screen-height', 'main-screen-class'],
+    'RunAtLoad': True,
+    'AbandonProcessGroup': True,
+    'ProcessType': 'Interactive',
+    'LimitLoadToSessionType': 'System',
+    'StandardOutPath': '/dev/console',
+    'StandardErrorPath': '/dev/console',
+}, open('$ROOT/build-root/LaunchDaemons/com.hakios.mgscreen.plist', 'wb'))
+"
 touch "$ROOT/build-root/etc/quiet"
+# The command the host asked for, if any (tools/ios-cmd.sh). It is a launch job of its own:
+# the job runner (etc/rc.jobs) cannot show its output, because init's patch sends its own
+# standard output to /dev/null when etc/quiet is there.
+if [ -x "$ROOT/userland/obj/hakios-cmd" ]; then
+	cp "$ROOT/userland/obj/hakios-cmd" "$ROOT/build-root/bin/"
+	python3 -c "
+import plistlib
+plistlib.dump({
+    'Label': 'com.hakios.cmd',
+    'ProgramArguments': ['/redwood/bin/hakios-cmd'],
+    'RunAtLoad': True,
+    'AbandonProcessGroup': True,
+    'ProcessType': 'Interactive',
+    'LimitLoadToSessionType': 'System',
+    'StandardOutPath': '/dev/console',
+    'StandardErrorPath': '/dev/console',
+}, open('$ROOT/build-root/LaunchDaemons/com.hakios.cmd.plist', 'wb'))
+"
+fi
 cat > "$ROOT/build-root/etc/rc" << 'EOF'
 # Hand process 1 over to the real iOS launchd
 exec /sbin/launchd.ios
@@ -121,6 +173,8 @@ cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
 /redwood/bin/svc_test
 /redwood/bin/surf_test
 /bin/ps -A
+# what the system believes the screen is: the scale and the size in points
+/redwood/bin/mg_test main-screen-scale main-screen-width main-screen-height main-screen-class
 /redwood/bin/rwtouch wait 35 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
 /redwood/bin/rwtouch wait 50 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
 /redwood/bin/rwtouch wait 70 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &

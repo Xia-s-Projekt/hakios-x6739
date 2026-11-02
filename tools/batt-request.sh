@@ -14,6 +14,10 @@
 #   status  the power supply class's status (1 charging, 2 discharging, 3 not charging, 4 full)
 #   online  1 while a charger is attached
 #
+# HAKIOS_REQUEST_EXTRA adds parameters of its own to the request, after the
+# battery's: the loader reads them from the same line (tools/ios-cmd.sh adds
+# "secs=N:extra=ARGS" that way). It must not contain a colon.
+#
 # The signs follow the kernel's own conventions (drivers/power/hakios.battery.c): the current
 # is positive while the cell is charging, and the temperature is in Celsius, not tenths.
 set -e
@@ -66,5 +70,6 @@ TC=$(( ${TEMP:-0} / 10 ))
 MV_MV=$(( ${MV:-0} / 1000 ))
 
 REQ="DARWIN-X6739:BOOT-XNU:batt=$BATT,$MV_MV,$CUR,$TC,$ST,${ONLINE:-0}"
+[ -n "$HAKIOS_REQUEST_EXTRA" ] && REQ="$REQ:$HAKIOS_REQUEST_EXTRA"
 echo "request: $REQ"
 adb -s "$S" shell "su -c \"printf '$REQ\n' > /dev/pmsg0\""
