@@ -266,8 +266,16 @@ The four checks that fail in our run are the visible edge of this:
 - "the OS cryptex: in neither md0 nor the flash" and the same for the App
   cryptex -- the cryptexes are not in our small root, and the tree's phone has
   them on the flash. The OS cryptex holds the dyld shared cache.
-- "the first boot's applications in /Applications" -- the staged applications
-  (`private/var/staged_system_apps`) are not in our small root.
+- "the first boot's applications in /Applications" -- the check reads
+  `/flash/private/var/staged_system_apps` on the Darwin volume and makes each
+  application in it a name in `/Applications` (`userland/src/init.c:236`). On
+  this phone that directory is empty, because the tree's own build of the system
+  image moved those 32 applications out of it and into `/Applications` already
+  (`userland/build.sh`: "the applications Darwin installs on its first boot ...
+  among the system's own in /Applications"). So the applications are installed
+  and this check has nothing left to do: `apfs.py ls` on the tree's
+  `system.apfs` -- the image on our phone -- shows Files.app, Health.app and
+  Calculator.app among the 174 in `/Applications`.
 - "a synthetic /redwood on it, for this image" -- our own image is already bound
   there.
 
