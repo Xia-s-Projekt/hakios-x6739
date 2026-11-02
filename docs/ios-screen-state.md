@@ -324,6 +324,31 @@ after it, 8.4 GB in 11 sparse pieces. This tree has the IPSW's unpacked images
 make the volume (`tools/apfs/dmg.py extract`) and to split it for writing
 (`tools/sparse-split.py`).
 
+## The cryptexes build here, and quickly
+
+The tree's `flashboot.apfs` is the boot volume (our small root) with the OS
+cryptex and the App cryptex as its containers 1 and 2 -- and the kernel takes the
+shared cache from the first. The tree builds them with
+`tools/apfs/mkapfs.py` from the unpacked cryptexes, and that works here, today:
+
+    mkapfs.py -z -o os.apfs OS=<sysimage/cryptex>
+      volume 0 "OS": 1412 files, 629 directories, 1 symbolic links,
+      2281 blocks of data (272 compressed in their resource fork, 1125 whole in
+      their attribute)
+      os.apfs: 3053 blocks of 4096 bytes, 256 free        (12.5 MB)
+
+    mkapfs.py -z -o app.apfs App=<sysimage/cryptex-app>
+      volume 0 "App": 884 files, 163 directories, 466 blocks of data
+      app.apfs: 1032 blocks of 4096 bytes, 256 free       (4.2 MB)
+
+Both in about a second. So the two missing containers are not missing at all --
+they are two commands away.
+
+The one thing that is missing is the tree's *own* build of them, which puts the
+dyld shared cache into the OS cryptex
+(`userland/build.sh`: `D=flashboot.os/System/Library/Caches/com.apple.dyld`, the
+cache linked in). The tree's cache is at `sysimage/20F66__iPhone10,3_6/dyld_shared_cache_arm64*`.
+
 ## The Setup Assistant
 
 The tree refuses it deliberately: `userland/src/inject_sb.c` replaces
