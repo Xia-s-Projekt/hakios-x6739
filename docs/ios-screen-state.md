@@ -69,6 +69,31 @@ renderer draws a frame in 28461 us (114 frames in 5008 ms, 22 a second), and the
 run uses one core (`cpus=1`). The tree's notes say the software renderer manages
 15 to 40 frames a second on four cores.
 
+## What the log keeps, and what it drops
+
+The loader keeps the first 256 KB and the last megabyte of XNU's log and drops
+the middle, saying so in one line ("the log between the first 256 KB and the
+last 1 MB was dropped"). The tree's own measurements, on the same set of 225
+modules:
+
+| window | log size | drop markers | modules in the log |
+| --- | --- | --- | --- |
+| 300 s | 1 466 579 | 1 | 2 |
+| 120 s | 1 466 582 | 1 | 28 |
+| 30 s | 1 185 596 | 0 | 225 |
+
+So a long run keeps the *end* -- which is the part that says whether the home
+screen came -- and loses the beginning, which is where the boot's own story is.
+Two things make the difference, and neither is enough alone: a short window and
+`QUIET=1` at build time, which sends launchd's own thousands of lines nowhere
+and leaves the daemons their output.
+
+Our run's log starts at 25.9 s of kernel time, which is exactly this: the
+beginning was evicted. Two ways to see the early boot are a short run with
+`HAKIOS_QUIET_JOBS=1` (the quiet jobs are already on by default), and the
+loader photographs the panel before XNU runs, so what was on it before the boot
+is not lost either.
+
 The lock screen is a different thing and the tree already handles it:
 `userland/src/inject_sb.c` dismisses it forcibly ten seconds after SpringBoard's
 run loop starts (`unlock()`, at `inject_sb.c:1581`), unless `autounlock=0` is
