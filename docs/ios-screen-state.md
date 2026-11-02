@@ -3,6 +3,16 @@
 Findings from the tree (`../refs/hakios-xnu-kernel`) and from
 the runs on the phone. Every claim here is file:line or log evidence.
 
+## What the tree's own words say
+
+`userland/src/var_store.c`, the tree's own description of the data volume:
+
+> /private/var is a memory filesystem (bsd/miscfs/ramfs), mounted empty by init at every
+> boot ... so nothing Darwin keeps there outlives the boot that wrote it: no home screen
+> layout, no application data, no baked wallpaper.
+
+That is the wallpaper's blocker, in the tree's own words.
+
 ## The picture on the panel is the Apple boot logo
 
 The window server draws and presents: with `gl=1` the Mesa software GLES renderer
@@ -26,6 +36,19 @@ by `backboardd` once user space is up. `usr/libexec/backboardd` has the strings
 So the phone stands on the boot logo because nothing dismisses it. The overlay is
 sustained while a system app has it up (`Not dismissing because overlay has been
 sustained by the system app`), and the system app here is SpringBoard.
+
+The dismissal hangs on the first boot: `BKBootUIPresenter` has `didFinishFirstBoot`,
+`backboardd` logs `First boot is finished` when it happens, and the first boot is
+detected from persistent state (`initWithSenderDescriptor:matcherDataProvider:
+persistentPropertyController:`) -- state that lives in `/private/var`, which on this
+phone is empty at every boot. So the first boot never finishes, the logo is never
+dismissed, and the home screen never appears.
+
+That makes the data volume the blocker for two things at once, not one: the wallpaper
+(PosterBoard has nowhere to keep it) and the boot logo (the first-boot state is not
+kept). The tree's reference board has the same code and reaches the home screen
+because its `/private/var` is kept (`var_store=1 ufs_write=1`, its device.conf says
+so).
 
 The lock screen is a different thing and the tree already handles it:
 `userland/src/inject_sb.c` dismisses it forcibly ten seconds after SpringBoard's
