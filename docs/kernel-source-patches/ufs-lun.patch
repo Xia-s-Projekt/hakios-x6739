@@ -1,0 +1,109 @@
+--- a/bsd/dev/hakios.ufs.c
++++ b/bsd/dev/hakios.ufs.c
+@@ -1314,20 +1314,24 @@
+ }
+ 
+ /*
+- * Which logical unit each unit the loader lists is (their device paths do not say): unit k is
+- * taken to be LUN k (ordinary logical units only: never a well-known one), and it is so only if
+- * block 1 (the GPT header, with the unit's own GUID in it) read through the loader
+- * is the same as block 1 of that LUN read here; no other LUN is read. The loader's reads are made
+- * first, with UEFI's list in; then this kernel's list goes in (with its proof) and stays in.
++ * Which logical unit each unit the loader lists is (their device paths do not say): a unit is on
++ * one of the LUNs the phone has (ordinary logical units only: never a well-known one), and it is
++ * on one of them only if block 1 (the GPT header, with the unit's own GUID in it) read through
++ * the loader is the same as block 1 of that LUN read here; which LUN it is on is the one that says
++ * so, and need not be LUN 0. The loader's reads are made first, with UEFI's list in; then this
++ * kernel's list goes in (with its proof) and stays in.
+  */
++#define UFS_LUN_MASK       0x07u                      /* the LUNs reads may go to: 0 to 2 */
+ static bool
+ ufs_native_map(bool all_units)
+ {
+ 	uint8_t *mine = kalloc_data(4096, Z_WAITOK), *theirs = kalloc_data(BLOCK_MAX_UNITS * 4096, Z_WAITOK);
+-	uint32_t units[BLOCK_MAX_UNITS], n = 0, mask = 0, darwin = ufs_entry("darwin");
++	uint32_t units[BLOCK_MAX_UNITS], n = 0, mask = UFS_LUN_MASK, darwin = ufs_entry("darwin");
++	uint8_t unit_lun[8];
+ 	bool good = mine != NULL && theirs != NULL;
+ 
+ 	memset(ufs_lun, 0xff, sizeof(ufs_lun));
++	memset(unit_lun, 0xff, sizeof(unit_lun));
+ 	for (uint32_t i = 0; good && i < ufs_parts && n < BLOCK_MAX_UNITS; i++) {
+ 		volatile struct loader_block_part *e = &ufs_page->part[i];
+ 
+@@ -1344,12 +1348,7 @@
+ 			break;
+ 		}
+ 		units[n++] = i;
+-		mask |= 1u << e->unit;
+ 		ufs_native_luns = n;
+-	}
+-	if (good && !all_units && (n != 1 || ufs_page->part[units[0]].unit != 0)) {
+-		printf("ufs: native: darwin is not on the first unit the loader lists: not LUN 0, not read here\n");
+-		good = false;
+ 	}
+ 	ufshc_set_luns(mask);
+ 	if (good && ufs_native_in(true) != 0) {
+@@ -1357,12 +1356,24 @@
+ 	}
+ 	for (uint32_t k = 0; good && k < n; k++) {
+ 		volatile struct loader_block_part *e = &ufs_page->part[units[k]];
+-
+-		if (ufshc_read((uint8_t)e->unit, 4096, mine, 4096) != 0 || memcmp(mine, theirs + k * 4096, 4096) != 0) {
+-			printf("ufs: native: %s: LUN %u's block 1 is NOT what the loader reads as its block 1\n", e->name, e->unit);
++		uint32_t l;
++
++		/* the LUN the unit is on is the one whose block 1 the loader reads as its block 1 */
++		for (l = 0; l < 8; l++) {
++			if ((mask & (1u << l)) == 0) {
++				continue;
++			}
++			if (ufshc_read((uint8_t)l, 4096, mine, 4096) == 0 &&
++			    memcmp(mine, theirs + k * 4096, 4096) == 0) {
++				break;
++			}
++		}
++		if (l >= 8) {
++			printf("ufs: native: %s: no LUN reads as the loader reads its block 1\n", e->name);
+ 			good = false;
+ 		} else {
+-			printf("ufs: native: %s is LUN %u: its GPT header read both ways is the same\n", e->name, e->unit);
++			unit_lun[e->unit] = (uint8_t)l;
++			printf("ufs: native: %s is LUN %u: its GPT header read both ways is the same\n", e->name, l);
+ 		}
+ 	}
+ 	if (!good) {
+@@ -1372,8 +1383,8 @@
+ 		for (uint32_t i = 0; i < ufs_parts; i++) {
+ 			volatile struct loader_block_part *e = &ufs_page->part[i];
+ 
+-			if (e->unit < 8 && (mask & (1u << e->unit)) && e->block_size == 4096) {
+-				ufs_lun[i] = (uint8_t)e->unit;
++			if (e->unit < 8 && unit_lun[e->unit] != 0xff && e->block_size == 4096) {
++				ufs_lun[i] = unit_lun[e->unit];
+ 				ufs_lun_offset[i] = e->start_lba * 4096;
+ 			}
+ 		}
+@@ -1782,11 +1793,6 @@
+ 				why = "the loader offers another partition";
+ 			} else if (ufs_page->part[i].flags & BLOCK_PART_UNIT) {
+ 				why = "it is a whole logical unit, not the partition";
+-			} else if (ufs_page->part[i].unit != 0) {
+-				/* the first unit UEFI lists, which this kernel's own driver reads as LUN 0 and
+-				 * has compared with the loader's reads; the device path this firmware gives
+-				 * says no logical unit number at all, so part[].lun is 0xff for every unit */
+-				why = "it is not on the first logical unit";
+ 			} else if (ufs_page->part[i].blocks < UFS_DARWIN_MIN) {
+ 				why = "it is smaller than the layout's 20 GiB";
+ 			} else if (ufs_page->part[i].block_size != 4096) {
+@@ -1862,8 +1868,8 @@
+ 				hakios_ufs_report("after the bench");
+ 				loader_return();
+ 			}
+-			printf("ufs: the partitions (LUN 0-%u) are read by this kernel's own UFS driver, its list in the "
+-			    "controller (kern.hakios.ufs_native=0: through the loader)\n", ufs_native_luns - 1);
++			printf("ufs: the partitions (on %u logical unit(s) of the phone's) are read by this kernel's own UFS "
++			    "driver, its list in the controller (kern.hakios.ufs_native=0: through the loader)\n", ufs_native_luns);
+ 		} else {
+ 			printf("ufs: this kernel's own UFS driver is not used: through the loader\n");
+ 		}
