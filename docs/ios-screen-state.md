@@ -38,6 +38,18 @@ overlay has been sustained by the system app`), and the system app here is
 SpringBoard. `BKBootUIPresenter` has `didFinishFirstBoot`, and `backboardd` logs
 `First boot is finished` when it happens.
 
+The overlay is a render overlay, above the window server's frames:
+`BKDisplayRenderOverlayAppleLogo` and `BKDisplayBootUIRenderOverlay` are drawn by
+`BKDisplayRenderOverlayManager`, which has
+`dismissOverlayWithAnimationSettings:requstedByPID:`. It goes away when it is
+explicitly dismissed or when the startup has finished -- the log line is
+`updateOverlay: pid:%d explicitlyDismissed:%{BOOL}u finishedStartup:%{BOOL}u`.
+
+The kernel's own console is not the culprit: `gc_pause()` sets
+`vc_progress_enable = FALSE` on the graphics-mode path, and the display driver
+takes that path with the first picture
+(`PE_initialize_console(NULL, kPEGraphicsMode)`).
+
 The first boot is not the reason, though, and this is worth saying plainly because
 it is the obvious guess: QEMU has no persistent storage either -- `/private/var` is
 a memory filesystem there too -- and it reaches the home screen all the same.
