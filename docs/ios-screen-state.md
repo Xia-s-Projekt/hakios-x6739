@@ -61,6 +61,29 @@ persistent data volume is `var_hfs=DEV` (`userland/src/init.c:825`,
 
 So: the wallpaper needs a data volume the phone does not have yet.
 
+The tree's own answer is `ufs_write=1 var_hfs=ufs_darwin_data` on the kernel's
+command line: with `ufs_write=1` the UFS driver gives the stretch of the phone's
+flash past the Darwin volume out as `/dev/ufs_darwin_data`
+(`bsd/dev/hakios.ufs.c`, `UFS_WRITE_FIRST` = 2042368, 12.2 GB), and `init` mounts
+it on `/private/var` (`userland/src/init.c:836`, `mount_data_volume()`). The
+empty volume is made once with `tools/mkdatavol.py` and flashed to `darwin`; it
+is 53 KB, because the image says DONT_CARE for everything the volume does not
+use.
+
+What is missing here is the loader's half: the kernel's writes are served by the
+loader (`bsd/dev/hakios.ufs.c`: "one character device alone takes writes --
+/dev/rufs_darwin, the port's own partition -- and in it only whole blocks from
+UFS_WRITE_FIRST on"). This loader's shared block has the fields for it
+(`struct loader_block.write_first`, `write_part_plus_one`) but the service that
+answers them is not implemented. The tree's loader also proves the partition by
+its GPT entry -- name, type, place, size and a unique GUID -- and the tree's
+notes say that on a second phone the GUID did not match and the volume never
+mounted ("`/dev/ufs_darwin_data: No such file or directory`, a memory
+filesystem instead).
+
+So the data volume is: a loader that serves the writes and names the partition,
+`tools/mkdatavol.py` to make the volume, and two arguments on the command line.
+
 ## The Setup Assistant
 
 The tree refuses it deliberately: `userland/src/inject_sb.c` replaces
