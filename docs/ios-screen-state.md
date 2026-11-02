@@ -177,6 +177,30 @@ beginning was evicted. Two ways to see the early boot are a short run with
 loader photographs the panel before XNU runs, so what was on it before the boot
 is not lost either.
 
+## The software renderer is not the problem
+
+The tree's own table of what works says the home screen is reached with the
+software renderer:
+
+> Graphics by default is CoreAnimation's software renderer, so everything is
+> slow: on the phone 15-40 frames a second on four cores.
+
+and, in the table:
+
+> Lock screen, unlock by a swipe, home screen with a full set of icons (two
+> pages), the standard wallpapers of Darwin userland 16 | Cellular network,
+> Bluetooth
+
+and the only thing the software renderer costs is:
+
+> Without `gpu=1` (the software renderer; always so in QEMU) the lock screen's
+> clock is simply white, without the 'vibrancy' under the colour of the
+> wallpapers, and the top of the wallpapers under them is not darkened.
+
+So the renderer draws the home screen and the standard wallpapers. The tree's
+board has no data volume either -- its wallpapers are the ones in the image --
+and it reaches them.
+
 ## The wallpaper cannot be drawn, because there is nowhere to keep it
 
 The live wallpaper is drawn by PosterBoard, in its own process, and handed over
