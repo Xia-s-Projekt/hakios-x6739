@@ -20,11 +20,28 @@ is up (190 `hakios-gl` lines, 1000+ frames) and the swap puts a 1125x2436 BGRA
 surface on the panel (`MiniIOMobileFramebuffer: swap 1 layer 0: surface 4`).
 
 But the loader's own reading of the panel (8x16 text cells) finds only a shape
-centred on it, about 184 x 224 pixels, and no cell of it matches XNU's console
-font. The root filesystem carries the boot logo the progress UI shows:
-`sysimage/rootfs/usr/share/progressui/applelogo@3x.tga`, and
-`System/Library/PrivateFrameworks/ProgressUI.framework/apple-logo@3x~iphone.png`
-is 194 x 237 pixels.
+centred on it, and no cell of it matches XNU's console font.
+
+That shape is the Apple boot logo, and the sizes say so beyond doubt. The image
+the progress UI shows is
+`System/Library/PrivateFrameworks/ProgressUI.framework/apple-logo@3x~iphone.png`,
+194 x 237 pixels (a CgBI PNG; `file` reports "PNG image data (CgBI), 194 x 237,
+8-bit/color RGBA"). The window server draws into a picture 1125 wide and the
+panel is 1080, so the logo lands on the panel 194 * 1080/1125 = 186 pixels wide
+and 237 * 1080/1125 = 228 high, centred -- left at x = 447, top at y = 1086.
+
+The loader's own reading of the panel says: the shape spans columns 56 to 80 of
+its 135 (x = 448 to 640) and rows 65 to 79 of its 150 (y = 1040 to 1280) -- 192
+by 240 pixels, centred at x = 544 against the panel's 540. Predicted 186 by 228;
+measured 192 by 240. The difference is the 8-pixel granularity of the reading.
+
+The root filesystem carries the logo for the progress UI as well:
+`sysimage/rootfs/usr/share/progressui/applelogo@3x.tga`.
+
+The picture on the panel is not the same in every run, which says the boot UI is
+live and being redrawn: the 70-second run (`glq.log`) shows a small shape of 20
+lit cells in 3 rows, and the 100-second runs (`wp2.log`, `gl-test.log`) show the
+full logo -- 260 lit cells in 14 rows, 23 cells wide.
 
 It is not the kernel's or the loader's: it is Darwin's own boot UI overlay, drawn
 by `backboardd` once user space is up. `usr/libexec/backboardd` has the strings
