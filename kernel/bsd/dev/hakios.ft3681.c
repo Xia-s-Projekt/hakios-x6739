@@ -574,6 +574,8 @@ ft3681_thread(__unused void *parameter, __unused wait_result_t result)
 	}
 
 	printf("ft3681: ready; a report is read every %u us\n", poll_us);
+	printf("ft3681: the DMA buffer is at %lx (physical %lx)\n",
+	    (unsigned long)dma_buffer, (unsigned long)dma_buffer_pa);
 
 	for (unsigned tick = 1;; tick++) {
 		polls++;
@@ -582,6 +584,19 @@ ft3681_thread(__unused void *parameter, __unused wait_result_t result)
 				idle_reports++;
 			} else {
 				reports++;
+				/*
+				 * The first few reports are printed in full, so that what the panel says can be
+				 * read off the log: the type, the count, and the first point's bytes. A driver that
+				 * decodes but does not draw shows its numbers here and nowhere else.
+				 */
+				if (reports <= 3) {
+					printf("ft3681: report %u: type %u count %u:", reports,
+					    (unsigned)(report[1] >> 4), (unsigned)(report[1] & 0x0f));
+					for (int i = 0; i < 14; i++) {
+						printf(" %02x", report[i]);
+					}
+					printf("\n");
+				}
 				report_to_touches(report);
 			}
 		} else {
