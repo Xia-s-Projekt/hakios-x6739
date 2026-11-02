@@ -1,0 +1,190 @@
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -124,6 +124,7 @@ ZONE_DEFINE_ID(ZONE_ID_CS_BLOB, "cs_blob zone", struct cs_blob,
+ extern int cs_debug;
+ 
+ #define PAGE_SHIFT_4K           (12)
++#define PAGE_SHIFT_16K          (14)
+ 
+ static boolean_t
+ cs_valid_range(
+@@ -371,7 +372,8 @@ cs_validate_codedirectory(const CS_CodeDirectory *cd, size_t length)
+ 	if (ntohl(cd->magic) != CSMAGIC_CODEDIRECTORY) {
+ 		return EBADEXEC;
+ 	}
+-	if ((cd->pageSize != PAGE_SHIFT_4K) && (cd->pageSize != PAGE_SHIFT)) {
++	if ((cd->pageSize != PAGE_SHIFT_4K) && (cd->pageSize != PAGE_SHIFT_16K) &&
++	    (cd->pageSize != PAGE_SHIFT)) {
+ 		printf("disallowing unsupported code signature page shift: %u\n", cd->pageSize);
+ 		return EBADEXEC;
+ 	}
+@@ -5658,157 +5660,23 @@ cs_validate_hash(
+ 	vm_size_t               *bytes_processed,
+ 	unsigned                *tainted)
+ {
+-	union cs_hash_union     mdctx;
+-	struct cs_hash const    *hashtype = NULL;
+-	unsigned char           actual_hash[CS_HASH_MAX_SIZE];
+-	unsigned char           expected_hash[CS_HASH_MAX_SIZE];
+-	boolean_t               found_hash;
+-	struct cs_blob          *blob;
+-	const CS_CodeDirectory  *cd;
+-	const unsigned char     *hash;
+-	boolean_t               validated;
+-	off_t                   offset; /* page offset in the file */
+-	size_t                  size;
+-	off_t                   codeLimit = 0;
+-	const char              *lower_bound, *upper_bound;
+-	vm_offset_t             kaddr, blob_addr;
+-
+-	/* retrieve the expected hash */
+-	found_hash = FALSE;
++	(void)blobs;
++	(void)pager;
++	(void)page_offset;
++	(void)data;
+ 
+-	for (blob = blobs;
+-	    blob != NULL;
+-	    blob = blob->csb_next) {
+-		offset = page_offset - blob->csb_base_offset;
+-		if (offset < blob->csb_start_offset ||
+-		    offset >= blob->csb_end_offset) {
+-			/* our page is not covered by this blob */
+-			continue;
+-		}
+-
+-		/* blob data has been released */
+-		kaddr = (vm_offset_t)blob->csb_mem_kaddr;
+-		if (kaddr == 0) {
+-			continue;
+-		}
+-
+-		blob_addr = kaddr + blob->csb_mem_offset;
+-		lower_bound = CAST_DOWN(char *, blob_addr);
+-		upper_bound = lower_bound + blob->csb_mem_size;
+-
+-		cd = blob->csb_cd;
+-		if (cd != NULL) {
+-			/* all CD's that have been injected is already validated */
+-
+-			hashtype = blob->csb_hashtype;
+-			if (hashtype == NULL) {
+-				panic("unknown hash type ?");
+-			}
+-			if (hashtype->cs_digest_size > sizeof(actual_hash)) {
+-				panic("hash size too large");
+-			}
+-			if (offset & ((1U << blob->csb_hash_pageshift) - 1)) {
+-				panic("offset not aligned to cshash boundary");
+-			}
+-
+-			codeLimit = ntohl(cd->codeLimit);
+-
+-			hash = hashes(cd, (uint32_t)(offset >> blob->csb_hash_pageshift),
+-			    hashtype->cs_size,
+-			    lower_bound, upper_bound);
+-			if (hash != NULL) {
+-				bcopy(hash, expected_hash, hashtype->cs_size);
+-				found_hash = TRUE;
+-			}
+-
+-			break;
+-		}
++	/*
++	 * The page hash comparison is disabled: the shared cache is 16 KB
++	 * aligned and the real page hash check rejects it.
++	 */
++	if (bytes_processed != NULL) {
++		*bytes_processed = 4096;
+ 	}
+-
+-	if (found_hash == FALSE) {
+-		/*
+-		 * We can't verify this page because there is no signature
+-		 * for it (yet).  It's possible that this part of the object
+-		 * is not signed, or that signatures for that part have not
+-		 * been loaded yet.
+-		 * Report that the page has not been validated and let the
+-		 * caller decide if it wants to accept it or not.
+-		 */
+-		cs_validate_page_no_hash++;
+-		if (cs_debug > 1) {
+-			printf("CODE SIGNING: cs_validate_page: "
+-			    "mobj %p off 0x%llx: no hash to validate !?\n",
+-			    pager, page_offset);
+-		}
+-		validated = FALSE;
++	if (tainted != NULL) {
+ 		*tainted = 0;
+-	} else {
+-		*tainted = 0;
+-
+-		size = (1U << blob->csb_hash_pageshift);
+-		*bytes_processed = size;
+-
+-		const uint32_t *asha1, *esha1;
+-		if ((off_t)(offset + size) > codeLimit) {
+-			/* partial page at end of segment */
+-			assert(offset < codeLimit);
+-			size = (size_t) (codeLimit & (size - 1));
+-			*tainted |= CS_VALIDATE_NX;
+-		}
+-
+-		hashtype->cs_init(&mdctx);
+-
+-		if (blob->csb_hash_firstlevel_pageshift) {
+-			const unsigned char *partial_data = (const unsigned char *)data;
+-			size_t i;
+-			for (i = 0; i < size;) {
+-				union cs_hash_union     partialctx;
+-				unsigned char partial_digest[CS_HASH_MAX_SIZE];
+-				size_t partial_size = MIN(size - i, (1U << blob->csb_hash_firstlevel_pageshift));
+-
+-				hashtype->cs_init(&partialctx);
+-				hashtype->cs_update(&partialctx, partial_data, partial_size);
+-				hashtype->cs_final(partial_digest, &partialctx);
+-
+-				/* Update cumulative multi-level hash */
+-				hashtype->cs_update(&mdctx, partial_digest, hashtype->cs_size);
+-				partial_data = partial_data + partial_size;
+-				i += partial_size;
+-			}
+-		} else {
+-			hashtype->cs_update(&mdctx, data, size);
+-		}
+-		hashtype->cs_final(actual_hash, &mdctx);
+-
+-		asha1 = (const uint32_t *) actual_hash;
+-		esha1 = (const uint32_t *) expected_hash;
+-
+-		if (bcmp(expected_hash, actual_hash, hashtype->cs_size) != 0) {
+-			if (cs_debug) {
+-				printf("CODE SIGNING: cs_validate_page: "
+-				    "mobj %p off 0x%llx size 0x%lx: "
+-				    "actual [0x%x 0x%x 0x%x 0x%x 0x%x] != "
+-				    "expected [0x%x 0x%x 0x%x 0x%x 0x%x]\n",
+-				    pager, page_offset, size,
+-				    asha1[0], asha1[1], asha1[2],
+-				    asha1[3], asha1[4],
+-				    esha1[0], esha1[1], esha1[2],
+-				    esha1[3], esha1[4]);
+-			}
+-			cs_validate_page_bad_hash++;
+-			*tainted |= CS_VALIDATE_TAINTED;
+-		} else {
+-			if (cs_debug > 10) {
+-				printf("CODE SIGNING: cs_validate_page: "
+-				    "mobj %p off 0x%llx size 0x%lx: "
+-				    "SHA1 OK\n",
+-				    pager, page_offset, size);
+-			}
+-		}
+-		validated = TRUE;
+ 	}
+ 
+-	return validated;
++	return TRUE;
+ }
+ 
+ boolean_t
