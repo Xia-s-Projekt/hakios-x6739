@@ -201,10 +201,24 @@ So the renderer draws the home screen and the standard wallpapers. The tree's
 board has no data volume either -- its wallpapers are the ones in the image --
 and it reaches them.
 
-## The wallpaper cannot be drawn, because there is nowhere to keep it
+## The wallpapers are on the phone
 
-The live wallpaper is drawn by PosterBoard, in its own process, and handed over
-as a placed layer; SpringBoard has no raster of its own and nobody bakes one
+The standard wallpapers of Darwin userland 16 are in the image, at
+`/Library/Wallpaper`, and the phone's `System` volume has them:
+
+    /Library/Wallpaper/DefaultWallpapers~iphone.plist
+    /Library/Wallpaper/Collections/    Bokeh, Classic_Stripes, Clownfish~iphone,
+                                        Desert, Solid_Black, Stripe, iOS_14
+    /Library/Wallpaper/Stills/Any/      365.Heritage_Stripe_Green,
+                                        370.Heritage_Stripe_Yellow,
+                                        385.Heritage_Stripe_Purple,
+                                        390.Heritage_Stripe_Blue,
+                                        395.Heritage_Stripe_Black
+
+These are the still wallpapers -- a picture, not a live one. The live wallpaper is
+a different thing, and it is what the tree's board does not have either: it is
+drawn by PosterBoard, in its own process, and handed over as a placed layer;
+SpringBoard has no raster of its own and nobody bakes one
 (`userland/src/inject_sb.c`, the poster switcher comment).
 
 PosterBoard and PaperBoard are launch angels
@@ -228,9 +242,9 @@ persistent data volume is `var_hfs=DEV` (`userland/src/init.c:825`,
 `ufs_darwin_data`. This phone has no such partition, and nothing passes
 `var_hfs` among the kernel's arguments.
 
-So: the wallpaper needs a data volume the phone does not have yet. (The Apple logo
-on the panel is a different thing: it is the boot UI overlay, and it is a separate
-problem -- see above.)
+So: the *live* wallpaper needs a data volume the phone does not have yet. The
+still wallpapers are already on the phone and need nothing. (The Apple logo on
+the panel is a separate problem: it is the boot UI overlay -- see above.)
 
 The tree's own answer is `ufs_write=1 var_hfs=ufs_darwin_data` on the kernel's
 command line: with `ufs_write=1` the UFS driver gives the stretch of the phone's
