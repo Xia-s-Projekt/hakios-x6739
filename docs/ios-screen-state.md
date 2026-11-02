@@ -239,6 +239,68 @@ Note what the carve costs: it takes the partition off Android's userdata, so
 Android's own data area shrinks. That is a change to the phone's storage and
 needs the user's own go-ahead.
 
+## The small root is not the image the tree's phone runs
+
+This is the difference between the two boards, and it is bigger than it looks.
+
+The tree has two images (`userland/build.sh`):
+
+- `root.apfs` (4 MB): "the small image: our init and test programs, etc/rc, and the
+  launchd jobs ... It travels in the payload next to the kernel (the second RAM
+  disk, /dev/md1) and is mounted on /redwood."
+- `system.apfs` (2.4 GB): "the real one", with the Darwin files, the cryptexes and
+  the applications Darwin installs on its first boot.
+
+And the tree's phone runs the *flash* arrangement (`docs/u-boot.md`, step 4):
+
+> **Darwin from `darwin`, still from RAM**: `CRYPTEXES=flash FLASHBOOT=1
+> userland/build.sh`, `xl ramdisk userland/flashboot.apfs`, `root_apfs=ufs_darwin
+> ufs=2`: the Darwin volume is the root, SpringBoard up.
+
+That is: the Darwin volume on the phone's flash is the root, the cryptexes come
+off the flash, and `flashboot.apfs` is the resident image. We run something else:
+`root_apfs=ufs_xnusys` with a small root of 5 MB built by `tools/mk-root.sh`.
+
+The four checks that fail in our run are the visible edge of this:
+
+- "the OS cryptex: in neither md0 nor the flash" and the same for the App
+  cryptex -- the cryptexes are not in our small root, and the tree's phone has
+  them on the flash. The OS cryptex holds the dyld shared cache.
+- "the first boot's applications in /Applications" -- the staged applications
+  (`private/var/staged_system_apps`) are not in our small root.
+- "a synthetic /redwood on it, for this image" -- our own image is already bound
+  there.
+
+So the tree's phone has the applications, the cryptexes and the shared cache, and
+ours does not. That is a difference in what is on the phone's flash, not in the
+kernel: our flash has the iOS volume (`xnusys`) but not the tree's Darwin volume
+with its cryptexes and staged applications.
+
+The tree's own steps (`docs/u-boot.md`, the phone's own list), which say exactly
+what that takes:
+
+1. **Backup** (`tools/backup-partitions.py --yes`, read only, as root): the boot
+   partitions of both slots, `vbmeta*`, `misc`, `devinfo`, `persist`, `modemst1/2`,
+   `fsg`, the first and last 8 blocks of every unit, each proven by three SHA-256s.
+2. **`darwin`** (`tools/userdata-carve.py --wipe DIR 20`): userdata shortened,
+   `darwin` (sda34, 20 GiB, APFS container type) at the end of LUN 0, two entries
+   changed, both copies of the table checked; written from Android (root) with
+   `dd`, read back; then `fastboot -w` -- **Android's data is erased**.
+3. **The Darwin volume** into `darwin`: Apple's root volume of the IPSW
+   (`tools/apfs/dmg.py extract`), the OS and App cryptexes after it, as the port's
+   own layout, 8.4 GB as 11 sparse pieces (`tools/sparse-split.py`), read back
+   with the image's own sum.
+4. **Darwin from `darwin`, still from RAM**: `CRYPTEXES=flash FLASHBOOT=1
+   userland/build.sh`, `xl ramdisk userland/flashboot.apfs`, `root_apfs=ufs_darwin
+   ufs=2`: the Darwin volume is the root, SpringBoard up.
+5. **The boot image of slot a**: U-Boot, the loader, a payload with the kernel,
+   `root.apfs` and `flashboot.apfs` as its resident image, the flash-root command
+   line; `fastboot flash boot_a`, `fastboot set_active a`.
+
+Steps 2 and 5 change the phone: step 2 shortens Android's userdata and erases
+Android's data, and step 5 replaces the boot image. Both need the user's
+go-ahead.
+
 ## The Setup Assistant
 
 The tree refuses it deliberately: `userland/src/inject_sb.c` replaces
