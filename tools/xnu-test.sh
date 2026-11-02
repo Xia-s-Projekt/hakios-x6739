@@ -60,10 +60,7 @@ python3 "$ROOT/tools/chainboot.py" "$BOOT" "$ROOT/mtkloader/mtkloader.bin" "$IMG
 
 if [ "${XNU_NO_FLASH}" != 1 ]; then
 	echo "== flashing boot_a =="
-	[ "$(adb -s $S get-state 2>/dev/null)" = device ] && adb -s $S reboot bootloader
-	for i in $(seq 1 120); do fastboot devices | rg -q "$S" && break; sleep 1; done
-	# (fastboot -s waits for ever for a phone that is not there: a run would hang for hours)
-	fastboot devices | rg -q "$S" || { echo "the phone did not come up in fastboot"; exit 1; }
+	"$ROOT/tools/fastboot-bootloader.sh" "$S"
 	[ "$(fastboot -s $S getvar current-slot 2>&1 | sed -n 's/^current-slot: //p')" = a ] || { echo "current slot is not a"; exit 1; }
 	fastboot -s $S flash boot_a "$IMG" 2>&1 | tail -2
 	fastboot -s $S reboot >/dev/null 2>&1
