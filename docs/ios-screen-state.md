@@ -33,22 +33,37 @@ by `backboardd` once user space is up. `usr/libexec/backboardd` has the strings
 (pid:%d)` and the class `BKDisplayRenderOverlayAppleLogo`, and it links
 `ProgressUI.framework/ProgressUI`.
 
-So the phone stands on the boot logo because nothing dismisses it. The overlay is
-sustained while a system app has it up (`Not dismissing because overlay has been
-sustained by the system app`), and the system app here is SpringBoard.
+The overlay is sustained while a system app has it up (`Not dismissing because
+overlay has been sustained by the system app`), and the system app here is
+SpringBoard. `BKBootUIPresenter` has `didFinishFirstBoot`, and `backboardd` logs
+`First boot is finished` when it happens.
 
-The dismissal hangs on the first boot: `BKBootUIPresenter` has `didFinishFirstBoot`,
-`backboardd` logs `First boot is finished` when it happens, and the first boot is
-detected from persistent state (`initWithSenderDescriptor:matcherDataProvider:
-persistentPropertyController:`) -- state that lives in `/private/var`, which on this
-phone is empty at every boot. So the first boot never finishes, the logo is never
-dismissed, and the home screen never appears.
+The first boot is not the reason, though, and this is worth saying plainly because
+it is the obvious guess: QEMU has no persistent storage either -- `/private/var` is
+a memory filesystem there too -- and it reaches the home screen all the same.
 
-That makes the data volume the blocker for two things at once, not one: the wallpaper
-(PosterBoard has nowhere to keep it) and the boot logo (the first-boot state is not
-kept). The tree's reference board has the same code and reaches the home screen
-because its `/private/var` is kept (`var_store=1 ufs_write=1`, its device.conf says
-so).
+## The Apple logo is the normal middle of a boot
+
+The tree says what to expect, for its own QEMU (`docs/getting-started/qemu.md`):
+
+> the CPU is emulated, so it is slow, and **the window is black at first**: that is
+> normal. On a fast desktop: black for the first minute, the Apple logo at about
+> one minute, the home screen at about five.
+
+So the logo is what a boot looks like on the way, and what is missing is the time
+after it. The tree's reference phone brings the home screen in under a minute
+(`docs/u-boot.md`: "brings the home screen in under a minute (the screenshot at
+60 s), with touch"), but that phone has a GPU and eight cores; this one draws in
+software on one core.
+
+That is the cheap thing to try first, and it costs nothing: the run has to be long
+enough. `loader_return_after=70` ends the run at 70 s of kernel time, and the last
+log line is at 92.9 s. A run of five minutes is what the tree's own slow case
+takes.
+
+What is genuinely slow here, and is worth fixing for its own sake: the software
+renderer draws a frame in 28461 us (114 frames in 5008 ms, 22 a second), and the
+run uses one core (`cpus=1`).
 
 The lock screen is a different thing and the tree already handles it:
 `userland/src/inject_sb.c` dismisses it forcibly ten seconds after SpringBoard's
@@ -82,7 +97,9 @@ persistent data volume is `var_hfs=DEV` (`userland/src/init.c:825`,
 `ufs_darwin_data`. This phone has no such partition, and nothing passes
 `var_hfs` among the kernel's arguments.
 
-So: the wallpaper needs a data volume the phone does not have yet.
+So: the wallpaper needs a data volume the phone does not have yet. (The Apple logo
+on the panel is a different thing: it is the boot UI, and it goes away with time --
+see above.)
 
 The tree's own answer is `ufs_write=1 var_hfs=ufs_darwin_data` on the kernel's
 command line: with `ufs_write=1` the UFS driver gives the stretch of the phone's
@@ -124,12 +141,9 @@ The tree has all of this for its reference board, and the pieces are:
   (`mkfs.hfsplus -U 0 -G 0 -M 755`); with another owner Darwin takes the volume
   for a data volume to migrate and stays at the progress bar.
 
-The reference board (`redwood`, the POCO X5 Pro) reaches the home screen with
-this: its `device.conf` says "storage works UFS read through the loader;
-/ /private/var kept with var_store=1 ufs_write=1". So the same code, the same
-Darwin user space, the same boot UI overlay -- and the difference between a home
-screen and a standing Apple logo is that one board keeps `/private/var` and the
-other does not.
+The reference board (`redwood`, the POCO X5 Pro) keeps it this way: its
+`device.conf` says "storage works UFS read through the loader; /private/var kept
+with var_store=1 ufs_write=1".
 
 Note what the carve costs: it takes the partition off Android's userdata, so
 Android's own data area shrinks. That is a change to the phone's storage and
