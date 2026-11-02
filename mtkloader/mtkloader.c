@@ -2599,6 +2599,50 @@ static uint8_t touch_bring_up(void)
 		out_dec(tries);
 		out(" report frames (the panel said 0xff every time)\n");
 	}
+#ifdef TOUCH_WAIT_MS
+	/*
+	 * TOUCH_WAIT_MS=N: keep reading the panel for N milliseconds after the first window, so a
+	 * finger put on the panel while the phone boots is seen and its coordinates printed. The
+	 * window above is TOUCH_REPORT_TRIES frames 10 ms apart, which is over before anyone can
+	 * reach the phone; this one is long enough to put a finger down in it. The reading itself
+	 * is the same one the kernel's driver makes, over the same DMA engine.
+	 */
+	{
+		uint32_t waited = 0;
+		uint8_t reg = FTS_REG_REPORT;
+		uint8_t report[FTS_REPORT_LEN];
+		struct fts_point pts[FTS_MAX_POINTS];
+		uint32_t n;
+
+		out("touch: waiting ");
+		out_dec(TOUCH_WAIT_MS);
+		out(" ms for a finger on the panel\n");
+		while (waited < TOUCH_WAIT_MS) {
+			if (mtk_i2c0_write_read(FTS_SLAVE_ADDR, &reg, 1, report, sizeof(report)) == 0 &&
+			    !fts_report_is_idle(report)) {
+				n = fts_decode_report(report, pts, FTS_MAX_POINTS);
+				out("touch: finger: report over DMA ok, type=");
+				out_hex(fts_report_type(report));
+				out(" count=");
+				out_dec(fts_report_count(report));
+				out(" points=");
+				out_dec(n);
+				out("\n");
+				for (uint32_t i = 0; i < n; i++) {
+					fts_say_point(&pts[i]);
+				}
+				break;
+			}
+			dbg_delay_ms(20);
+			waited += 20;
+		}
+		if (waited >= TOUCH_WAIT_MS) {
+			out("touch: no finger in ");
+			out_dec(TOUCH_WAIT_MS);
+			out(" ms\n");
+		}
+	}
+#endif
 
 	if (r_h == 0 && r_l == 0 && chip_h == 0x56 && chip_l == 0x62) {
 		out("touch: FocalTech FT3681 active and ready on I2C0 (0x38)\n");
