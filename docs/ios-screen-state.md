@@ -84,6 +84,31 @@ filesystem instead).
 So the data volume is: a loader that serves the writes and names the partition,
 `tools/mkdatavol.py` to make the volume, and two arguments on the command line.
 
+The tree has all of this for its reference board, and the pieces are:
+
+- `configs/persist.config`: the fragment that turns it on -- `CONFIG_UFS=2`,
+  `CONFIG_UFS_WRITE=y`, `CONFIG_VAR_STORE=y` -- with the warning that it writes
+  to the phone's storage, to the partition `darwin` only.
+- `tools/userdata-carve.py`: cuts that partition off the end of Android's
+  userdata, once, by hand. It shrinks Android's f2fs in place with Android's own
+  kernel (F2FS_IOC_RESIZE_FS), then writes a new GPT in which userdata ends
+  where the shrunk filesystem ends and `darwin` takes the rest from the next
+  2 MB boundary. Both copies of the table are made and checked. It refuses
+  unless the old table checks out, userdata is the last partition, and no f2fs
+  segment past the new end holds a valid block.
+- `tools/mkdatavol.py`: the empty HFS Plus volume (53 KB to flash), made
+  case-sensitive (HFSX) and journaled, its root owned by root
+  (`mkfs.hfsplus -U 0 -G 0 -M 755`); with another owner Darwin takes the volume
+  for a data volume to migrate and stays at the progress bar.
+
+The reference board (`redwood`, the POCO X5 Pro) reaches the home screen with
+this: its `device.conf` says "storage works UFS read through the loader;
+/ /private/var kept with var_store=1 ufs_write=1".
+
+Note what the carve costs: it takes the partition off Android's userdata, so
+Android's own data area shrinks. That is a change to the phone's storage and
+needs the user's own go-ahead.
+
 ## The Setup Assistant
 
 The tree refuses it deliberately: `userland/src/inject_sb.c` replaces
