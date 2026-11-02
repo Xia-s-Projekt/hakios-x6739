@@ -24,6 +24,11 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 COMMON=${HAKIOS_COMMON:-$(cd "$ROOT/.." && pwd)/refs/hakios-xnu-kernel}
+# The graphics library the window server draws with, and the Mesa it is built on. They live in the
+# tree's own build (tools/build-graphics.sh makes them); without them the window server has no
+# renderer at all: "CoreAnimation: Failed to initialize Metal or OpenGLES contexts!"
+GL_DIR=${HAKIOS_GL_DIR:-$COMMON/userland/obj}
+MESA_DIR=${HAKIOS_MESA_DIR:-$COMMON/xnu-deps/build/mesa/out}
 
 rm -rf "$ROOT/build-root"
 cp -a "$COMMON/userland/root" "$ROOT/build-root"
@@ -32,6 +37,31 @@ ln -sf init "$ROOT/build-root/sbin/launchd.ios"
 ln -sf private/var/tmp "$ROOT/build-root/tmp"
 mkdir -p "$ROOT/build-root/flash" "$ROOT/build-root/Cryptexes/OS" "$ROOT/build-root/Cryptexes/App"
 ln -sf . "$ROOT/build-root/redwood"
+# The graphics library the window server draws with, and the Mesa under it. The phone sees this
+# image's /lib as /redwood/lib, and the window server's library (libhakios.dylib, injected into
+# backboardd) opens /redwood/lib/libhakios.gl.dylib from there.
+if [ -f "$GL_DIR/libhakios.gl.dylib" ] && [ -f "$MESA_DIR/libOSMesa.8.dylib" ]; then
+	cp "$GL_DIR/libhakios.gl.dylib" "$ROOT/build-root/lib/"
+	cp "$MESA_DIR/libOSMesa.8.dylib" "$ROOT/build-root/lib/"
+else
+	echo "mk-root.sh: no graphics library ($GL_DIR/libhakios.gl.dylib, $MESA_DIR/libOSMesa.8.dylib):" >&2
+	echo "mk-root.sh: the window server will have no renderer (tools/build-graphics.sh makes them)" >&2
+fi
+# The jobs the phone's launchd starts. The tree's own list (userland/root/LaunchDaemons) is what
+# the tree built; the wallpaper needs more of them: PosterBoard, which draws the wallpaper live in
+# its own process, never starts without the daemons it waits for. The tree's notes (docs/ru/notes.md)
+# name the stall exactly: cloudd asks com.apple.nsurlsessiond thousands of times a session, and
+# nsurlsessiond is not in the image, so the home screen never appears and no widget or poster does
+# either. With nsurlsessiond and cloudd in, the same run reaches 112 processes and 15 widget and
+# poster processes, PosterBoard among them.
+if [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
+	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored" \
+		python3 mkjobs.py ../sysimage/rootfs "$ROOT/build-root/LaunchDaemons" \
+		com.apple.notifyd com.apple.logd com.apple.containermanagerd com.apple.containermanagerd.system \
+		com.apple.runningboardd com.apple.backboardd com.apple.mobile.usermanagerd com.apple.lsd \
+		com.apple.iconservices.iconservicesagent com.apple.pluginkit.pkd com.apple.SpringBoard \
+		com.apple.nsurlsessiond com.apple.cloudd com.apple.syncdefaultsd com.apple.appstored) >/dev/null 2>&1
+fi
 python3 -c "
 import struct
 p = '$ROOT/build-root/sbin/init'
