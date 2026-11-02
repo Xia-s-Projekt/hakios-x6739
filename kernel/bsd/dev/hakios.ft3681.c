@@ -475,6 +475,8 @@ static struct {
 	uint32_t x, y;
 } contact[FTS_MAX_POINTS];
 
+static bool down[FTS_MAX_POINTS];
+
 static uint32_t polls, reports, points, bad_reports, idle_reports;
 
 static void
@@ -483,8 +485,16 @@ report_to_touches(const uint8_t *report)
 	struct fts_point pts[FTS_MAX_POINTS];
 	uint32_t n;
 
-	for (int i = 0; i < FTS_MAX_POINTS; i++) {
-		contact[i].down = false;      /* until the report says otherwise */
+	/*
+	 * The event byte of a point says what the panel is doing with that finger: 0 is the press
+	 * (the frame where the finger lands), 1 is the release, and 2 is a contact that is still
+	 * down. Reading the phone's own driver on 2026-11-01: of the frames the panel sent while a
+	 * finger was on the glass, 113 carried event 2 and 2 carried event 0 -- the press -- while
+	 * the frames after the finger left carried event 1. A driver that only knows event 2 loses
+	 * the press of a tap that never moves, so 0 and 2 are both a contact here and 1 is not.
+	 */
+	for (uint32_t i = 0; i < FTS_MAX_POINTS; i++) {
+		down[i] = false;
 	}
 	n = decode_report(report, pts, FTS_MAX_POINTS);
 	for (uint32_t i = 0; i < n; i++) {
@@ -495,24 +505,25 @@ report_to_touches(const uint8_t *report)
 		if (id >= FTS_MAX_POINTS) {
 			continue;
 		}
-		if (p->event != 2) {         /* 2 = a contact; the others are a release */
+		if (p->event == 1) {         /* this finger has left the glass */
 			continue;
 		}
 		x = scale_x(p->x);
 		y = scale_y(p->y);
+		down[id] = true;
 		points++;
 		if (!contact[id].down) {
 			hakios_touch_post(HAKIOS_TOUCH_DOWN, id, x, y);
-			contact[id].down = true;
 		} else if (contact[id].x != x || contact[id].y != y) {
 			hakios_touch_post(HAKIOS_TOUCH_MOVE, id, x, y);
 		}
+		contact[id].down = true;
 		contact[id].x = x;
 		contact[id].y = y;
 	}
 	/* a finger that is no longer in the report has lifted */
 	for (uint32_t id = 0; id < FTS_MAX_POINTS; id++) {
-		if (contact[id].down) {
+		if (contact[id].down && !down[id]) {
 			contact[id].down = false;
 			hakios_touch_post(HAKIOS_TOUCH_UP, id, contact[id].x, contact[id].y);
 		}
