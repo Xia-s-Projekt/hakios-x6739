@@ -362,6 +362,23 @@ cache linked in), and that build works here too, and the result is checked:
 98 seconds to build, 39 to check, and the tree's own checker says the image is
 clean and reads back exactly as it was made.
 
+And the system image with the applications in it, built the tree's way
+(`sysimage/rootfs` with the tree's own changes, then `mkapfs.py`):
+
+    174 applications in the volume (142 of Darwin's own plus the 32 staged ones:
+    AppleTV, Books, Files, FindMy, Health ...)
+    volume 0 "System": 42705 files, 15749 directories, 668 symbolic links,
+    344041 blocks of data (7983 compressed in their resource fork, 29872 whole in
+    their attribute)
+    system.apfs: 357674 blocks of 4096 bytes, 256 free       (1.46 GB)
+
+    check-image.sh system.apfs System=<the same directory>
+      check-image.py: apfsck -cw: clean
+      check-image.py: volume 0: 59122 entries read back by apfs-tool, every one
+      as in <the directory>
+
+48 seconds to build, 43 to check. `Files.app` is in it.
+
 So the whole of what the tree's phone has that ours does not -- the OS cryptex
 with the shared cache, the App cryptex, and the applications of the system image
 -- can be built on this machine, from what this tree already has unpacked. What
