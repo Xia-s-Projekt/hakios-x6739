@@ -1874,18 +1874,22 @@ static void shot_panel(void)
 	}
 }
 
-/* The picture, as the host's tools/fbshot.py reads it. */
-static void shot_print(void)
+/* The picture, as the host's tools/fbshot.py reads it. The number tells them apart. */
+static void shot_print(int number, const char *what)
 {
 	static const char digits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	uint64_t fb = fbc.base;
 
 	fbc.base = 0;  /* the picture is in the log, not on the panel */
-	dbg_puts("fbshot 1: begin ");
+	dbg_puts("fbshot ");
+	dbg_dec(number);
+	dbg_puts(": begin ");
 	dbg_dec(SHOT_W);
 	dbg_putc(' ');
 	dbg_dec(SHOT_H);
-	dbg_puts(" (the panel when XNU came back)\n");
+	dbg_puts(" (");
+	dbg_puts(what);
+	dbg_puts(")\n");
 	for (uint32_t at = 0; at < SHOT_BYTES; at += 150) {
 		uint32_t n = SHOT_BYTES - at < 150 ? SHOT_BYTES - at : 150;
 		char line[205];
@@ -1901,11 +1905,15 @@ static void shot_print(void)
 			line[k++] = digits[v & 63];
 		}
 		line[k] = 0;
-		dbg_puts("fbshot 1: ");
+		dbg_puts("fbshot ");
+		dbg_dec(number);
+		dbg_puts(": ");
 		dbg_puts(line);
 		dbg_putc('\n');
 	}
-	dbg_puts("fbshot 1: end\n");
+	dbg_puts("fbshot ");
+	dbg_dec(number);
+	dbg_puts(": end\n");
 	fbc.base = fb;
 }
 
@@ -1972,7 +1980,7 @@ void xnu_returned(uint64_t log_pa, uint64_t len, uint64_t reason, uint64_t code,
 	}
 	save_log(&sp, 1);
 	dbg_puts("=== end of XNU log ===\n");
-	shot_print();
+	shot_print(2, "the panel when XNU came back");
 	show_log_tail(40);
 	dbg_delay_ms(2000);
 	reset_board();
@@ -4330,6 +4338,17 @@ void mtkloader_main(uint64_t dtb)
 	fbc.x = 0;
 	fbc.y = fbc.top = 0;
 	fbc.fg = 0xff40ff40u;
+	/*
+	 * A picture of the panel now, with the loader's own text on it: what the panel shows
+	 * before XNU has run at all. The picture taken when XNU comes back is the same buffer,
+	 * so the two together say whether the window server's drawing reached the panel or the
+	 * panel kept what was there before.
+	 */
+	if (fb_base && fb_pitch) {
+		dcache_clean_range(fb_base, (uint64_t) fb_pitch * PANEL_H);
+	}
+	shot_panel();
+	shot_print(1, "the panel before XNU ran");
 	out("== mtkloader: Darwin/XNU on X6739 (MT6893) ==\n");
 	fbc.fg = 0xffffffffu;
 	out("LK dtb ");
