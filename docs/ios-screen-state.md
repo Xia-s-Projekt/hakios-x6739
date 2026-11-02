@@ -344,10 +344,29 @@ shared cache from the first. The tree builds them with
 Both in about a second. So the two missing containers are not missing at all --
 they are two commands away.
 
-The one thing that is missing is the tree's *own* build of them, which puts the
-dyld shared cache into the OS cryptex
+The tree's own build of them puts the dyld shared cache into the OS cryptex
 (`userland/build.sh`: `D=flashboot.os/System/Library/Caches/com.apple.dyld`, the
-cache linked in). The tree's cache is at `sysimage/20F66__iPhone10,3_6/dyld_shared_cache_arm64*`.
+cache linked in), and that build works here too, and the result is checked:
+
+    mkapfs.py -z -o os.apfs OS=<cryptex + the shared cache>
+      volume 0 "OS": 1455 files, 630 directories, 1 symbolic links,
+      244908 blocks of data (315 compressed in their resource fork, 1125 whole in
+      their attribute)
+      os.apfs: 246406 blocks of 4096 bytes, 256 free       (1.0 GB)
+
+    check-image.sh os.apfs OS=<the same directory>
+      check-image.py: apfsck -cw: clean
+      check-image.py: volume 0: 2086 entries read back by apfs-tool, every one as
+      in <the directory>
+
+98 seconds to build, 39 to check, and the tree's own checker says the image is
+clean and reads back exactly as it was made.
+
+So the whole of what the tree's phone has that ours does not -- the OS cryptex
+with the shared cache, the App cryptex, and the applications of the system image
+-- can be built on this machine, from what this tree already has unpacked. What
+is left is the phone: the `darwin` partition to put the Darwin volume in, and
+the boot image to boot from it.
 
 ## The Setup Assistant
 
