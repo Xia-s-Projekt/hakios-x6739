@@ -280,14 +280,42 @@ reads it:
     16547 directories, 601698 blocks of 4096 used
 
 So the whole system image -- the applications, the Darwin files, the manifest's
-permissions -- is on the phone's flash and is the root. What is missing is only
-what the *small* root would have carried alongside it: the two cryptexes, with
-the shared cache in the OS one, and the 32 staged applications (which the tree's
-`userland/build.sh` moves out of `private/var/staged_system_apps` into
-`/Applications` while making the system image).
+permissions -- is on the phone's flash and is the root.
 
-In other words: the flash half of the tree's arrangement is done, and the
-cryptexes are the half that is not.
+## Exactly what the cryptex checks want
+
+`mount_cryptex()` (`userland/src/init.c:149`) looks for the OS cryptex as
+container 1 and the App cryptex as container 2 -- first of the *boot volume*
+(`/dev/md0,c=1`), and if that has no such container (EINVAL) then of the flash
+(`/dev/ufs_xnusys,c=1`):
+
+    the OS cryptex from /dev/ufs_xnusys,c=1: Invalid argument
+    [FAIL] the OS cryptex: in neither md0 nor the flash
+
+Both fail here, and the reason is the container count. The tree's
+`flashboot.apfs` is the boot volume with the cryptexes as its containers 1 and 2
+(`userland/build.sh`: "the third container: Apple's App cryptex as it is"). The
+tree's `root.apfs` -- the small image -- has one volume, `redwood`, and so does
+the tree's `system.apfs`: one volume, `System`.
+
+So the cryptexes are meant to be *additional containers of the boot volume*, and
+our boot volume (our 5 MB small root, `tools/mk-root.sh`) has one container, like
+the tree's small image. The tree's `CRYPTEXES=flash` recipe puts them on the
+flash instead, as Apple's own images in `darwin` right after the Darwin volume
+(containers 1 and 2 of the *Darwin volume*), which is a different arrangement
+again -- one this phone has not got, because it has no `darwin` partition.
+
+And the shared cache is not missing, though: the init check "run a program
+through dyld and the shared cache" passes, and `/redwood/Cryptexes/OS` and
+`/redwood/Cryptexes/App` are there. The tree's `select-system.py` says why:
+"from the framework directories (the code itself is in the dyld shared cache)". So
+the cache came with the `System` volume that is on the phone's flash, and the
+cryptex mounts are a second copy of it that the tree's arrangement expects but
+does not need.
+
+In other words: the flash half of the tree's arrangement is done, the shared
+cache is present, and the two failing cryptex checks are about a second copy of
+it that this phone's arrangement does not have.
 
 The tree's own steps (`docs/u-boot.md`, the phone's own list), which say exactly
 what that takes:
@@ -337,7 +365,13 @@ after it, 8.4 GB in 11 sparse pieces. This tree has the IPSW's unpacked images
 make the volume (`tools/apfs/dmg.py extract`) and to split it for writing
 (`tools/sparse-split.py`).
 
-## The cryptexes build here, and quickly
+## The cryptexes build here, and quickly (but this phone does not need them)
+
+The tree's own build of the two cryptexes works here -- and since the shared
+cache is already on the phone's flash, they turn out not to be what this phone
+is missing. They are here because they are the way the tree's arrangement puts
+the cache into the boot volume, and this phone's arrangement gets it from the
+`System` volume instead.
 
 The tree's `flashboot.apfs` is the boot volume (our small root) with the OS
 cryptex and the App cryptex as its containers 1 and 2 -- and the kernel takes the
@@ -394,12 +428,9 @@ And the system image with the applications in it, built the tree's way
 
 So the whole of what the tree's phone has that ours does not -- the OS cryptex
 with the shared cache, the App cryptex, and the applications of the system image
--- can be built on this machine, from what this tree already has unpacked.
-
-The applications are already on the phone (the `System` volume of 45044 files
-that the kernel reads as the root), so what is left to build and put on the
-phone is the two cryptexes -- 1.0 GB and 4.2 MB, as the containers 1 and 2 of
-the boot volume, the first carrying the shared cache the kernel takes.
+-- can be built on this machine, from what this tree already has unpacked. The
+applications are already on the phone (the `System` volume of 45044 files that
+the kernel reads as the root), and the shared cache is in it.
 
 ## The Setup Assistant
 
