@@ -67,6 +67,26 @@ The kernel's own console is not the culprit: `gc_pause()` sets
 takes that path with the first picture
 (`PE_initialize_console(NULL, kPEGraphicsMode)`).
 
+What is missing is the dismissal. The overlay goes away when it is explicitly
+dismissed or when the startup has finished, and the strings say what stops it:
+"Not dismissing because overlay has been sustained by the system app". So
+something sustains it, and it is not the clock.
+
+The one thing on this phone that the tree's reference board does not have is the
+injected library in SpringBoard. `init` announces the injection ("library
+insertion: .../redwood/lib/libhakios.sb.dylib SpringBoard"), and the library is
+in the image -- the tree's own `userland/root/lib/libhakios.sb.dylib` carries the
+unlock hook (`SBLockScreenManager`, `unlockUIFromSource:withOptions:`). But
+neither the hook's output nor its summary line appears in any log: the tree's
+`inject_sb.c` prints one line per replaced method ("found %#lx, expected %#lx;
+left alone") and a summary of what it hooked, and there is not one of them in
+the 70-second log, which kept its head.
+
+That is a lead, not a conclusion: the log's beginning was evicted in the
+100-second run, and the tree's own hooks may simply not print on a clean load.
+The tree's `unlock()` is the thing that dismisses the lock screen, ten seconds
+after SpringBoard's run loop starts.
+
 The first boot is not the reason, though, and this is worth saying plainly because
 it is the obvious guess: QEMU has no persistent storage either -- `/private/var` is
 a memory filesystem there too -- and it reaches the home screen all the same.
@@ -92,6 +112,16 @@ core takes about two and a half minutes to the lock screen and four cores about 
 minute and a half; and after SpringBoard appears the system is still busy
 registering applications for another 30 to 40 seconds. So a run wants minutes, not
 seconds, and it wants more than one core.
+
+But time alone is not the whole answer, and the 100-second run says so. In that
+run (`wp2.log`) SpringBoard was up and registering services ("Service stub
+created for com.apple.NTKFaceSnapshotService" and a dozen more), the window
+server was answering backboardd's calls, and the boot UI was still on the panel
+when the run ended at 125.9 s of kernel time -- the logo, 260 lit cells in 14
+rows, in exactly the place the logo was in the 70-second run.
+
+So the boot UI is not simply late. It is up, and it is being sustained, while the
+system around it is fully running.
 
 What is genuinely slow here, and is worth fixing for its own sake: the software
 renderer draws a frame in 28461 us (114 frames in 5008 ms, 22 a second), and the
