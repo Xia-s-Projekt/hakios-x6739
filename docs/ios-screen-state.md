@@ -58,12 +58,16 @@ software on one core.
 
 That is the cheap thing to try first, and it costs nothing: the run has to be long
 enough. `loader_return_after=70` ends the run at 70 s of kernel time, and the last
-log line is at 92.9 s. A run of five minutes is what the tree's own slow case
-takes.
+log line is at 92.9 s. The tree's own numbers say how much longer: on QEMU, one
+core takes about two and a half minutes to the lock screen and four cores about a
+minute and a half; and after SpringBoard appears the system is still busy
+registering applications for another 30 to 40 seconds. So a run wants minutes, not
+seconds, and it wants more than one core.
 
 What is genuinely slow here, and is worth fixing for its own sake: the software
 renderer draws a frame in 28461 us (114 frames in 5008 ms, 22 a second), and the
-run uses one core (`cpus=1`).
+run uses one core (`cpus=1`). The tree's notes say the software renderer manages
+15 to 40 frames a second on four cores.
 
 The lock screen is a different thing and the tree already handles it:
 `userland/src/inject_sb.c` dismisses it forcibly ten seconds after SpringBoard's
