@@ -238,6 +238,36 @@ system fills the console, and the loader keeps only the first 256 KB and the las
 megabyte of it (see above), so the program waits until the end of the run
 (`loader_return_after=`) and prints then.
 
+## What the touch in the log is
+
+The `wp2` run's log (100 s of kernel time, `touchscreen=1`) has backboardd
+receiving real digitizer events:
+
+    backboardd[52] [TouchEvents] contact 1 presence: touching
+    backboardd[52] [TouchEvents] touchstats 151D... events starting 9.83801s
+        ago: [ down: 2, up: 2, rangeIn: 2, rangeOut: 2, fromEdge: 1, pathsSeen: 1
+
+and `rwtouch: notification com.hakios.unlock: posted` right after each one.
+
+Those touches are not a finger. They are ours: `tools/mk-root.sh` puts three
+lines in the image's `etc/rc.jobs` --
+
+    /redwood/bin/rwtouch wait 35 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
+
+-- and the log's three rounds of events land at about 35 s, 50 s and 70 s, which
+is what those three lines say. `rwtouch` writes the samples into
+`/dev/hakios-touch` itself (`userland/src/rwtouch.c`: "replay touches through
+/dev/hakios-touch").
+
+So the chain below the hardware is proven on the phone: the samples reach
+`/dev/hakios-touch`, `libhakios.dylib` turns them into HID events in
+backboardd, and backboardd counts down, up, rangeIn and rangeOut. What is not
+proven is a finger on this phone's panel reaching the same place: the kernel the
+phone runs has no FT3681 driver (the chip ID lines in the log are the *loader's*
+own probe -- "probing MT6893 I2C0 for FocalTech FT3681...", "chip_id=0x5662",
+"no point in 1000 report frames (the panel said 0xff every time)" -- and the
+kernel's own driver prints nothing at all).
+
 ## What is left to prove
 
 - The command's output has never come back. The transport is proven (the `cmd=`
