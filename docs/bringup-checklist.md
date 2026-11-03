@@ -216,7 +216,7 @@ From the phone's own device tree (`refs/fdt-x6739.dtb`), not from the reference 
   DT-derived identity (`X6739`, `mediatek,mt6893`) only.
 * One root shell command per `adb` invocation — never `&&` or `;` inside one quoted
   `su -c` string; it silently drops root for everything after the first command.
-* Never work in `/tmp` (RAM-backed tmpfs on this host). Scratch is `~/.hermes/cache/scratch`.
+* Keep scratch and build output on persistent storage, not a RAM-backed temporary filesystem.
 * Do not commit to `refs/hakios-xnu-kernel` — it is upstream and read-only for device work.
 * The phone leaves USB entirely for 2–4 min during an init-retry loop; poll for ~10 min
   before calling it dead. A dark screen after that needs a power cycle and a USB reseat.

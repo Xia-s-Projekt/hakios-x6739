@@ -12,6 +12,18 @@ arguments, starts the kernel, and brings the phone back to Android afterwards.
 work. Graphics still use Mesa softpipe on the CPUs rather than the Mali-G77, so interaction is
 slow; Wi-Fi, audio and the remaining hardware drivers are still missing.
 
+## Development disclosure
+
+Device-port development, code changes, investigation notes and documentation in this repository were produced using agentic AI tools. The maintainer's role was reviewing the generated code and providing device observations and bug reports, not writing the implementation by hand. Upstream HakiOS and third-party source retain their own authorship and licenses; this disclosure does not claim that AI created those dependencies.
+
+AI-generated changes can be wrong, unsafe or incompletely tested. Review source and evidence rather than trusting generated explanations or historical status claims.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, current priorities, test expectations and public-sharing rules. Older bring-up documents are historical and may contradict later results. Internal handoff and resume notes are retained privately, not published.
+
+This public tree is **source-only**. It does not include the privately tested kernel, iOS files, SDKs, vendor firmware, phone images, device trees or raw run logs. Source-to-tested-kernel reproduction still needs work; a successful build is not proof that an image is safe to flash. Build dependencies and limitations are documented in [docs/host-build.md](docs/host-build.md).
+
 ## The difference from the reference port
 
 The X6739 is a **different SoC** from the reference MediaTek port, not a variant of it. What carries

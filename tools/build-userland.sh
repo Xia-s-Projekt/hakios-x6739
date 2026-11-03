@@ -12,7 +12,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 COMMON=${HAKIOS_COMMON:-$(cd "$ROOT/.." && pwd)/refs/hakios-xnu-kernel}
-export THEOS=${THEOS:-/mnt/mainline/theos}
+export THEOS=${THEOS:?set THEOS to a Theos installation containing the iPhoneOS16.5 SDK}
 
 [ -x "$COMMON/xnu-deps/host/bin/xnu-clang" ] || {
 	echo "build-userland.sh: no xnu-clang in $COMMON/xnu-deps/host/bin" >&2; exit 1; }

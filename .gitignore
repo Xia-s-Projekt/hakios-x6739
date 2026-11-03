@@ -33,5 +33,11 @@ __pycache__/
 userland/obj/
 build-host/
 .antumbra_state
+# private local archive made before public-history cleanup
+local-private/
+# locally built kernel; public tree contains source and patch records only
+mach.development.mt6893
+# Claude Code's local worktrees and session files
+.claude/
 # macOS
 .DS_Store

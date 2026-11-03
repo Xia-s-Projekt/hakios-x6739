@@ -2,16 +2,11 @@
 # build-kernel-linux.sh: build the HakiOS XNU kernel on this Linux machine.
 #
 # The common tree (../refs/hakios-xnu-kernel) needs a Mach-O toolchain and the theos SDK, and
-# xnu-env.sh expects them under $THEOS (default ~/theos, which is not wanted here). Everything
-# this script uses lives under /mnt/mainline, so nothing is written to the home directory:
-#
-#   /mnt/mainline/theos/toolchain/linux/iphone/bin   cctools (ld64, nm, otool, strip, ...)
-#   /mnt/mainline/theos/sdks/iPhoneOS16.5.sdk         the theos SDK (sparse clone of theos/sdks)
-#   /mnt/mainline/xnu-src/xnu-8796.121.2              the kernel tree (xnu/apply.sh)
+# Set THEOS to a Theos installation with cctools and the iPhoneOS16.5 SDK. XNU_SRC defaults to
+# the common tree's applied XNU source, and KERNEL_OUT defaults to this repository's ignored
+# mach.development.mt6893.
 #
 # Usage: tools/build-kernel-linux.sh [-jN] [extra make args]
-#   The kernel lands in $XNU_SRC/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837
-#   and is copied to /mnt/mainline/hakios-kernel.
 #
 # The exit status is 2 on this configuration: the last steps of XNU's own build make the kernel
 # extensions' symbol sets (config/*.symbolset) and run check_all_exports, and they fail for
@@ -21,8 +16,9 @@ set -e -o pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 COMMON=${HAKIOS_COMMON:-$HERE/../refs/hakios-xnu-kernel}
 
-export THEOS=${THEOS:-/mnt/mainline/theos}
-export XNU_SRC=${XNU_SRC:-/mnt/mainline/xnu-src/xnu-8796.121.2}
+export THEOS=${THEOS:?set THEOS to a Theos installation containing cctools and the iPhoneOS16.5 SDK}
+export XNU_SRC=${XNU_SRC:-$COMMON/xnu-src/xnu-8796.121.2}
+KERNEL_OUT=${KERNEL_OUT:-$HERE/mach.development.mt6893}
 JOBS=16
 [ "$1" = "-j" ] && JOBS=$2 && shift 2
 [ "${1#-j}" != "$1" ] && JOBS=${1#-j} && shift
@@ -40,7 +36,8 @@ if [ ! -f "$XNU_SRC/makedefs/MakeInc.def" ]; then
 	(cd "$COMMON" && bash xnu-deps/setup.sh --stage2)
 fi
 
-log=${KERNEL_LOG:-/mnt/mainline/kernel-build.log}
+log=${KERNEL_LOG:-$HERE/logs/kernel-build.log}
+mkdir -p "$(dirname "$log")"
 
 # The drivers this phone's kernel is built with: this repository's own choice
 # (configs/x6739.config -- the tree's touch driver is for the POCO's SPI chip, not this phone's
@@ -56,7 +53,7 @@ kernel=$XNU_SRC/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837
 [ -f "$kernel" ] || { echo "no kernel was produced: $kernel (log: $log)" >&2; exit 1; }
 # and the build step that failed must be one of the symbol-set steps, not a compile or a link
 (cd "$COMMON" && KERNEL="$kernel" bash tools/make-kernel.sh --judge "$log") || exit 1
-cp -p "$kernel" /mnt/mainline/hakios-kernel
-echo "built: /mnt/mainline/hakios-kernel ($kernel, $(stat -c %s "$kernel") bytes)"
+cp -p "$kernel" "$KERNEL_OUT"
+echo "built: $KERNEL_OUT ($kernel, $(stat -c %s "$kernel") bytes)"
 echo "log: $log"
 exit 0

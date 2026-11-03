@@ -33,7 +33,7 @@ The four members the port needs:
 ## Getting them
 
 ```sh
-cd /mnt/project/Misc/hakios/hakios-x6739
+cd /path/to/hakios-x6739
 bash tools/fetch-ios.sh identity     # the device tree and the loader's identity.h
 bash tools/fetch-ios.sh system       # the three images, and the system image out of them
 ```

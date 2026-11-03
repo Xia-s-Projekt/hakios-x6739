@@ -6,7 +6,7 @@ only two of their thirteen byte patterns match what a compiler produces now,
 so the changes have to be made in the source instead.
 
 Two of them are done. They are here as the record of what was changed and why,
-and they apply to the tree in /mnt/mainline/xnu-src/xnu-8796.121.2 with
+and they apply to `$XNU_SRC` with
 `patch -p1`.
 
 ## code-signing-16k.patch

@@ -1,6 +1,6 @@
 # What the iOS side shows on this phone, and what is missing
 
-Findings from the tree (`/mnt/project/Misc/hakios/refs/hakios-xnu-kernel`) and from
+Findings from the tree (`../refs/hakios-xnu-kernel`) and from
 the runs on the phone. Every claim here is file:line or log evidence.
 
 ## What the tree's own words say

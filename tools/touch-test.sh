@@ -16,7 +16,7 @@
 # "points" is the count of points the panel reported; while nobody touches the screen it stays 0
 # and every report is idle. It is the user's finger on the glass that makes it grow.
 #
-# usage: HAKIOS_SERIAL=... XNU_KERNEL=/mnt/mainline/hakios-kernel tools/touch-test.sh [seconds]
+# usage: HAKIOS_SERIAL=... XNU_KERNEL=/path/to/kernel tools/touch-test.sh [seconds]
 set -e
 S=${HAKIOS_SERIAL:?set HAKIOS_SERIAL to the serial of your phone, as adb devices shows it}
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,7 +27,7 @@ OUT=${XNU_LOG_OUT:-$ROOT/logs/touch-last.log}
 export XNU_ARGS="cpus=1 touchscreen=1 touch_lat=1"
 export XNU_SECS=$SECS
 export XNU_LOG_OUT=$OUT
-export XNU_KERNEL=${XNU_KERNEL:-/mnt/mainline/hakios-kernel}
+export XNU_KERNEL=${XNU_KERNEL:-$ROOT/mach.development.mt6893}
 
 [ -f "$XNU_KERNEL" ] || { echo "touch-test: no kernel at $XNU_KERNEL" >&2; exit 1; }
 echo "touch-test: kernel $XNU_KERNEL ($(stat -c%s "$XNU_KERNEL") bytes)"

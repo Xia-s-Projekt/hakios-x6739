@@ -34,11 +34,9 @@
 set -e -o pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 COMMON=${HAKIOS_COMMON:-$HERE/../refs/hakios-xnu-kernel}
-export THEOS=${THEOS:-/mnt/mainline/theos}
+export THEOS=${THEOS:?set THEOS to a Theos installation containing the iPhoneOS16.5 SDK}
 
-# ninja is not in the distribution's packages here; a copy is kept beside this repository's cache
-NINJA_DIR=${HAKIOS_NINJA_DIR:-$HOME/.hermes/cache/scratch/bin}
-[ -x "$NINJA_DIR/ninja" ] && PATH="$NINJA_DIR:$PATH"
+[ -n "${HAKIOS_NINJA_DIR:-}" ] && [ -x "$HAKIOS_NINJA_DIR/ninja" ] && PATH="$HAKIOS_NINJA_DIR:$PATH"
 command -v ninja >/dev/null || { echo "no ninja (HAKIOS_NINJA_DIR, or install it)" >&2; exit 1; }
 command -v meson >/dev/null || { echo "no meson" >&2; exit 1; }
 

@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: APSL-2.0 */
+/* X6739 port modification, 2026-11-03: restore the report register after identity probing. */
 /*
  * The touch screen of the X6739 (Infinix GT 10 Pro): a FocalTech FT3681 on the MT6893's I2C0,
  * as a source of touches for /dev/hakios-touch (sys/hakios.input.h). Only with boot-arg

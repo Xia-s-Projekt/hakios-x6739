@@ -231,9 +231,8 @@ In `mtkloader/mtki2c.h`:
 ### Step 3: Verify FT3681 Detection in Loader
 Run the build and test cycle:
 ```bash
-cd /mnt/project/Misc/hakios/hakios-x6739
 ./mtkloader/build.sh
-HAKIOS_SERIAL=102562537K104189 XNU_SECS=30 XNU_ARGS="cpus=1" tools/xnu-test.sh
+HAKIOS_SERIAL=... XNU_SECS=30 XNU_ARGS="cpus=1" tools/xnu-test.sh
 ```
 Check `logs/pstore/console-ramoops-0`:
 Confirm the probe outputs:
@@ -287,8 +286,8 @@ in `mtkloader/mt6360.h` (new file) and `mtkloader/mtki2c.h`.
 ### 7.1 The rail (MT6360 LDO2 over I2C5)
 
 The phone's own regulator module for this chip is the MTK/Richtek 5.10 one
-(`/mnt/project/HoshimaticProject/.mt6893_index/drivers/regulator/mt6360-regulator.c`, the source of
-the shipped `mt6360-regulator.ko`). Its framing is **flat**, not the 6.1 core's banked one:
+(the MediaTek/Richtek 5.10 `mt6360-regulator.c`, source of the shipped
+`mt6360-regulator.ko`). Its framing is **flat**, not the 6.1 core's banked one:
 
 - slave id: the LDO bank, `0x64`; the wire address byte is `0xc8`
 - voltage selector register `0x15` (LDO2 CTRL3), 3.3 V is `0xd0`
