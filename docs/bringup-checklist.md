@@ -8,9 +8,7 @@ This is the state of the port, area by area, with what is proven and what is not
 written from the run logs and the source, not from intention. A line that says *missing*
 means it has never been seen to work on the phone.
 
-Last updated 2026-11-03. Current commit: `e377f6c` (plus the uncommitted FT3681 diagnostic
-prints). Read `docs/RESUME-2026-11-03.md` for the state of the work in detail, and
-`docs/ios-screen-state.md` for the screen.
+Last updated 2026-11-03. Read `docs/ios-screen-state.md` for the screen and `docs/port-plan.md` for the plan.
 
 ---
 
@@ -216,7 +214,7 @@ From the phone's own device tree (`refs/fdt-x6739.dtb`), not from the reference 
   DT-derived identity (`X6739`, `mediatek,mt6893`) only.
 * One root shell command per `adb` invocation — never `&&` or `;` inside one quoted
   `su -c` string; it silently drops root for everything after the first command.
-* Never work in `/tmp` (RAM-backed tmpfs on this host). Scratch is `a scratch directory on disk`.
+* Keep scratch and build output on persistent storage, not a RAM-backed temporary filesystem.
 * Do not commit to `refs/hakios-xnu-kernel` — it is upstream and read-only for device work.
 * The phone leaves USB entirely for 2–4 min during an init-retry loop; poll for ~10 min
   before calling it dead. A dark screen after that needs a power cycle and a USB reseat.
@@ -229,12 +227,10 @@ From the phone's own device tree (`refs/fdt-x6739.dtb`), not from the reference 
 
 | | |
 |---|---|
-| `docs/RESUME-2026-11-03.md` | the state of the work right now, in detail |
 | `docs/ios-screen-state.md` | the boot UI overlay, the wallpaper, the panel measurements |
 | `docs/port-plan.md` | the port, step by step |
 | `docs/mt6893-facts.md` | the evidence for every number above |
 | `docs/touchscreen-ft3681.md` | the FT3681's architecture |
-| `docs/handoff-touch-i2c0.md` | the touch work, in detail |
 | `docs/wifi-mt6893.md` | the conninfra Wi-Fi facts and plan |
 | `docs/ios-firmware.md` | the iOS image: where it comes from, how it is carved |
 | `docs/kernel-source-patches/` | the source-level patches, and the reasoning |

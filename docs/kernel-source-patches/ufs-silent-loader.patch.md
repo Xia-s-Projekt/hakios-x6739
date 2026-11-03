@@ -81,7 +81,7 @@ Disassembled from `refs/hakios-xnu-kernel/prebuilt/hakios-kernel`
 The source tree's version had replaced that last step with a strict comparison against the
 loader's copy. Diffing `refs/hakios-xnu-kernel/drivers/storage/hakios.ufs.c` (the reference
 port's, identical to the prebuilt's source) against
-`../refs/xnu-src/xnu-8796.121.2/bsd/dev/hakios.ufs.c` shows it: our tree added the LUN
+`$XNU_SRC/bsd/dev/hakios.ufs.c` shows it: our tree added the LUN
 search and the `unit_lun[]` bookkeeping, and dropped the prebuilt's "the unit's own number is
 the LUN" assumption. On a loader that answers, both work. On a loader that does not, only the
 prebuilt's shape does — which is the whole of this patch.

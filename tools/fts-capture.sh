@@ -1,8 +1,9 @@
 #!/bin/bash
 # Capture raw FT3681 reports (sysfs) and Android's evdev stream while a finger touches.
 set -u
-SERIAL="${HAKIOS_SERIAL:-DEVICE_SERIAL}"
-OUT="${1:-../hakios-x6739/logs/fts-capture}"
+SERIAL="${HAKIOS_SERIAL:?set HAKIOS_SERIAL to the serial shown by adb devices}"
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+OUT="${1:-$ROOT/logs/fts-capture}"
 mkdir -p "$OUT"
 BASE=/sys/devices/platform/soc/11015000.i2c/i2c-0/0-0038
 DUR="${DUR:-180}"

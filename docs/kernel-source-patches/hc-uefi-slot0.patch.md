@@ -114,6 +114,6 @@ build no longer needs it: the pattern does not occur in the new kernel
 (`grep -c` for the old bytes is 0, and the refusal string is gone from the
 binary).
 
-Applied to `../refs/xnu-src/xnu-8796.121.2/bsd/dev/hakios.ufshc.c`, and
+Applied to `$XNU_SRC/bsd/dev/hakios.ufshc.c`, and
 mirrored to `refs/hakios-xnu-kernel/drivers/storage/hakios.ufshc.c` so the next
 sync does not lose it.

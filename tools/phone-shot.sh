@@ -15,11 +15,11 @@
 #
 # usage: tools/phone-shot.sh [SECONDS] [OUT.png]
 set -e
-S=${HAKIOS_SERIAL:-DEVICE_SERIAL}
+S=${HAKIOS_SERIAL:?set HAKIOS_SERIAL to the serial shown by adb devices}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WAIT=${1:-900}
 OUT=${2:-$ROOT/logs/panel.png}
-LOG=$HOME/.cache/hakios-scratch/cache/scratch/shot-panel.log
+LOG=${XNU_LOG_OUT:-$ROOT/logs/shot-panel.log}
 
 echo "waiting up to ${WAIT}s for the phone"
 for i in $(seq 1 $((WAIT / 5))); do

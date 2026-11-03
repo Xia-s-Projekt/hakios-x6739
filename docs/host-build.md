@@ -1,50 +1,40 @@
-# Building the kernel on this Linux machine
+# Building the kernel on Linux
 
-The kernel is the common tree's XNU (Apple 8796.121.2) with HakiOS's patches. It builds on Linux
-with cctools (the Mach-O linker) and the theos iPhoneOS16.5 SDK. Nothing goes into the home
-directory: the toolchain, the SDK and the kernel tree live under `../refs`.
+This repository contains device sources and patch records, not a kernel binary, SDK, iOS files or vendor firmware. The tested home-screen kernel remains a private local build; its exact source-to-binary reproduction is unfinished. Do not flash a newly built image without reviewing its source and validating the remaining patch drift.
 
-    tools/build-kernel-linux.sh -j16        # the build; the kernel lands in ../refs/hakios-kernel
+## Dependencies
 
-What it uses, and where each piece came from:
+Obtain the HakiOS common tree separately and set `HAKIOS_COMMON` to its location. By default, scripts expect `../refs/hakios-xnu-kernel` relative to this repository. Its own license and build instructions apply.
 
-| what | where | how |
-| --- | --- | --- |
-| cctools (ld64, nm, otool, strip, lipo, libtool, nmedit, ctf_insert, codesign_allocate, install_name_tool) | `../refs/theos/toolchain/linux/iphone/bin` | the Linux iOS toolchain of L1ghtmann/llvm-project (`iOSToolchain-x86_64.tar.xz`, ld64-956.6), unpacked under `theos/toolchain/` |
-| the theos SDK | `../refs/theos/sdks/iPhoneOS16.5.sdk` | sparse clone of github.com/theos/sdks (`git clone --depth 1 --filter=blob:none --sparse`) |
-| the kernel tree | `../refs/xnu-src/xnu-8796.121.2` | `xnu/apply.sh` in the common tree (Apple's XNU + `xnu/hakios.patch` + the drivers) |
-| the host tools (mig, migcom, tcsh, unifdef) | `xnu-deps/host/bin` | `xnu-deps/setup.sh --stage1` |
-| the SDK the kernel is compiled against | `xnu-deps/sdk/iPhoneOS16.5.xnu.sdk` | `xnu-deps/setup.sh --stage1` (stage 2 adds the two static libraries) |
+Set `THEOS` to a separately obtained toolchain installation containing:
 
-`THEOS` must point at `../refs/theos` (xnu-env.sh defaults it to `~/theos`, which is not
-wanted here) and `XNU_SRC` at `../refs/xnu-src/xnu-8796.121.2`.
+- `toolchain/linux/iphone/bin/ld` and the other cctools;
+- `sdks/iPhoneOS16.5.sdk/usr/include`.
 
-## The machine configuration
+These dependencies are not redistributed here. Contributors must obtain and use them under their applicable licenses.
 
-`MACHINE=MT6893` does not exist: the tree's ARM64 machine configurations are
-`BCM2837 T6000 T8101 T8103 VMAPPLE` (`makedefs/MakeInc.def`), and `xnu-build.sh` uses `BCM2837`
-by default. The phone's own kernel (`mach.development.mt6893`) is the same build: its version
-string says `BUILD/obj/DEVELOPMENT_ARM64_BCM2837`, and the name `mach.development.mt6893` is the
-copy the device repository keeps.
+`XNU_SRC` defaults to `$HAKIOS_COMMON/xnu-src/xnu-8796.121.2`. The common tree's `xnu/apply.sh` prepares that source tree; `xnu-deps/setup.sh` prepares host tools and the kernel SDK.
 
-## What the phone's kernel is, exactly
+From this repository:
 
-`mach.development.mt6893` is the common tree's `prebuilt/hakios-kernel` with thirteen
-instruction patches (`tools/patch-kernel-mt6893.py`): the UFS controller's address
-(0x11270000 instead of the tree's 0x1d84000), the LUN mask (0-2), a code-signing check that
-accepts a 16 KB page shift, the ramfs as the loader fills it, and two framebuffer flags.
+```sh
+export HAKIOS_COMMON=/path/to/hakios-xnu-kernel
+export THEOS=/path/to/theos
+export TMPDIR="$PWD/build-host"
+mkdir -p "$TMPDIR" logs
+tools/build-kernel-linux.sh -j4
+```
 
-The patch script is verified against the shipped kernel: applying it to `prebuilt/hakios-kernel`
-reproduces `mach.development.mt6893` byte for byte (13 patches, 77 bytes differ).
+`KERNEL_OUT` defaults to the ignored local file `mach.development.mt6893`; `KERNEL_LOG` defaults to `logs/kernel-build.log`. Building does not flash a device.
 
-The byte patterns are specific to the revision the prebuilt was built from. A kernel built from
-the tree's `main` today does not match them (the sources say "Darwin" where the prebuilt says
-"iOS", since the rename in 45df619), so the patches must be re-derived for a fresh build.
+## Machine configuration and patch status
 
-## The build's exit status
+The existing build uses `DEVELOPMENT_ARM64_BCM2837` as its generic ARM64 configuration, not a dedicated `MT6893` machine configuration. The device's addresses and drivers are applied separately.
 
-`make` exits 2 on this configuration: the last steps make the kernel extensions' symbol sets
-(`config/*.symbolset`) and run `check_all_exports`, which fail for names this kernel does not
-have (DriverKit's IOService methods, Apple silicon's `_t8110dart_*`). Nothing here loads a kext.
-`tools/make-kernel.sh --judge <log>` accepts exactly those failures and rejects any other; it
-says the build is good.
+The older `tools/patch-kernel-mt6893.py` does not reproduce the latest privately tested kernel. Do not treat its output, or a newly compiled kernel, as device-tested merely because compilation succeeds. The public source tree still needs source-level integration and reproducibility work for all device-specific fixes.
+
+The private tested kernel includes a 192 MiB ramfs quota for the current 512 MiB XNU memory window and the FT3681 polling-register fix. Preserve runtime page-size calculations when porting the quota change; a fixed page count previously reduced capacity to 48 MiB.
+
+## Build failures
+
+A previous local configuration linked a kernel but exited 2 in the kext symbol-set checks. `tools/build-kernel-linux.sh` delegates acceptance of that failure to the common tree's `tools/make-kernel.sh --judge`; a compile or link failure is not success. Check the build log and verify source changes are present before device testing.

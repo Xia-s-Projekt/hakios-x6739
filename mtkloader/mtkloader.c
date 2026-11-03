@@ -2693,7 +2693,7 @@ static void fts_say_point(const struct fts_point *p)
  * MT6893: the reference board's touch is an OmniVision TD4160, a TCM controller on SPI2. This
  * board's is a FocalTech FT3681 on I2C0 (see docs/touchscreen-ft3681.md). The path below probes
  * it over I2C0; the controller's register table, clocks, pinmux and timings are all in
- * docs/handoff-touch-i2c0.md, which also lists what mtki2c.h still gets wrong.
+ * docs/touchscreen-ft3681.md, which also lists what mtki2c.h still gets wrong.
  */
 static uint8_t touch_bring_up(void)
 {

@@ -16,12 +16,12 @@
 #
 # usage: tools/long-boot.sh [SECONDS] [CORES]
 set -e
-S=${HAKIOS_SERIAL:-DEVICE_SERIAL}
+S=${HAKIOS_SERIAL:?set HAKIOS_SERIAL to the serial shown by adb devices}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SECS=${1:-420}
 CORES=${2:-4}
-LOG=$HOME/.cache/hakios-scratch/cache/scratch/long-boot.log
-OUT=$HOME/.cache/hakios-scratch/cache/scratch/panel.png
+LOG=${XNU_LOG_OUT:-$ROOT/logs/long-boot.log}
+OUT=${3:-$ROOT/logs/panel.png}
 
 export HAKIOS_SERIAL=$S
 export XNU_ARGS="cpus=$CORES touchscreen=1 gl=1"
@@ -34,6 +34,6 @@ bash "$ROOT/tools/xnu-cycle.sh" || true
 echo "=== the panel after XNU ==="
 python3 "$ROOT/tools/fbshot.py" "$LOG" "$OUT" 2 || echo "no second picture in the log"
 echo "=== the panel before XNU ==="
-python3 "$ROOT/tools/fbshot.py" "$LOG" "$HOME/.cache/hakios-scratch/cache/scratch/panel-before.png" 1 || \
+python3 "$ROOT/tools/fbshot.py" "$LOG" "$ROOT/logs/panel-before.png" 1 || \
 	echo "no first picture in the log"
 echo "log: $LOG"

@@ -13,9 +13,6 @@ import re
 import struct
 import sys
 
-DEFAULT = ('../recovery_tree/android_recovery_device_x6739/'
-           'recovery/root/lib/modules/i2c-mt65xx.ko')
-
 # struct mtk_i2c_compatible, after the two pointers: the bit fields are packed into bytes
 # exactly as the compiler lays them out (little endian, seven one-bit fields in the first byte).
 FLAGS = (
@@ -103,7 +100,9 @@ def decode_flags(raw):
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT
+    if len(sys.argv) != 2:
+        raise SystemExit(f'usage: {sys.argv[0]} path/to/i2c-mt65xx.ko')
+    path = sys.argv[1]
     blob = open(path, 'rb').read()
     secs = sections(blob)
     syms = symbols(blob, secs)
