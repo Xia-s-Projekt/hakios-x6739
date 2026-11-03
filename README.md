@@ -8,8 +8,9 @@ of the project, Infinix Hot 20 X6826B, MT6768): a bare-metal loader that chains 
 phone's own Android kernel, brings up what XNU cannot, builds XNU's device tree and boot
 arguments, starts the kernel, and brings the phone back to Android afterwards.
 
-**Nothing has been booted yet.** Every area in `device.conf` is `missing`, and no image has been
-flashed to the phone.
+**The port boots to the iOS 16.5 home screen.** Native UFS, four CPUs, display, battery and touch
+work. Graphics still use Mesa softpipe on the CPUs rather than the Mali-G77, so interaction is
+slow; Wi-Fi, audio and the remaining hardware drivers are still missing.
 
 ## The difference from the reference port
 

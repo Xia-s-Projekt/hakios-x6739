@@ -576,6 +576,7 @@ ft3681_thread(__unused void *parameter, __unused wait_result_t result)
 	printf("ft3681: ready; a report is read every %u us\n", poll_us);
 	printf("ft3681: the DMA buffer is at %lx (physical %lx)\n",
 	    (unsigned long)dma_buffer, (unsigned long)dma_buffer_pa);
+	command = FTS_REG_REPORT;
 
 	for (unsigned tick = 1;; tick++) {
 		polls++;

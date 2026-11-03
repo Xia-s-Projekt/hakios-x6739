@@ -32,11 +32,23 @@ MESA_DIR=${HAKIOS_MESA_DIR:-$COMMON/xnu-deps/build/mesa/out}
 
 rm -rf "$ROOT/build-root"
 cp -a "$COMMON/userland/root" "$ROOT/build-root"
+if [ -n "${HAKIOS_RC_JOBS:-}" ] && [ ! -f "$COMMON/userland/$HAKIOS_RC_JOBS" ]; then
+	echo "mk-root.sh: no userland/$HAKIOS_RC_JOBS" >&2
+	exit 1
+fi
 ln -sf init "$ROOT/build-root/sbin/launchd"
 ln -sf init "$ROOT/build-root/sbin/launchd.ios"
 ln -sf private/var/tmp "$ROOT/build-root/tmp"
 mkdir -p "$ROOT/build-root/flash" "$ROOT/build-root/Cryptexes/OS" "$ROOT/build-root/Cryptexes/App"
 ln -sf . "$ROOT/build-root/redwood"
+if [ "${HAKIOS_LSD_DIAGNOSTIC:-0}" = 1 ]; then
+	cp "$ROOT/userland/obj/libhakios.lsd.dylib" "$ROOT/build-root/lib/"
+	printf '%s\n' '/redwood/lib/libhakios.lsd.dylib lsd' >> "$ROOT/build-root/etc/inject.conf"
+fi
+if [ "${HAKIOS_SB_EXIT_DIAGNOSTIC:-0}" = 1 ]; then
+	cp "$ROOT/userland/obj/libhakios.sb-exit.dylib" "$ROOT/build-root/lib/"
+	printf '%s\n' '/redwood/lib/libhakios.sb-exit.dylib SpringBoard' >> "$ROOT/build-root/etc/inject.conf"
+fi
 # The graphics library the window server draws with, and the Mesa under it. The phone sees this
 # image's /lib as /redwood/lib, and the window server's library (libhakios.dylib, injected into
 # backboardd) opens /redwood/lib/libhakios.gl.dylib from there.
@@ -179,6 +191,9 @@ cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
 /redwood/bin/rwtouch wait 50 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
 /redwood/bin/rwtouch wait 70 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
 EOF
+if [ -n "${HAKIOS_RC_JOBS:-}" ]; then
+	cp "$COMMON/userland/$HAKIOS_RC_JOBS" "$ROOT/build-root/etc/rc.jobs"
+fi
 python3 "$COMMON/tools/apfs/mkapfs.py" -z --plain fw -o "$ROOT/build-root.apfs" "redwood=$ROOT/build-root" >/dev/null
 rm -rf "$ROOT/build-root"
 echo "small root: $ROOT/build-root.apfs ($(stat -c %s "$ROOT/build-root.apfs") bytes)"
