@@ -27,4 +27,12 @@ for src in "$ROOT"/userland/*.c; do
 	xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" -O1 \
 		-o "$ROOT/userland/obj/$name" "$src"
 done
+xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" -O1 \
+	-fno-omit-frame-pointer -fno-optimize-sibling-calls -Wall -Wextra -Wno-frame-address \
+	-dynamiclib -install_name /redwood/lib/libhakios.lsd.dylib -framework Foundation -lobjc \
+	-o "$ROOT/userland/obj/libhakios.lsd.dylib" "$ROOT/userland/lsd-diagnostic.m"
+xnu-clang -arch arm64 -isysroot "$THEOS/sdks/iPhoneOS16.5.sdk" -O1 \
+	-fno-omit-frame-pointer -fno-optimize-sibling-calls -Wall -Wextra \
+	-dynamiclib -install_name /redwood/lib/libhakios.sb-exit.dylib -framework Foundation -lobjc \
+	-o "$ROOT/userland/obj/libhakios.sb-exit.dylib" "$ROOT/userland/springboard-exit.m"
 ls -l "$ROOT/userland/obj"

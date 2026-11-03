@@ -11,7 +11,7 @@ OUT=${XNU_LOG_OUT:-$ROOT/logs/xnu-last.log}
 SECS=${XNU_SECS:-45}
 # XNU_ARGS: the kernel's own command line (cores and so on); the clock comes from this machine
 # touchscreen=1: the kernel's touch driver (kernel/bsd/dev/hakios.ft3681.c) starts only with it
-XNU_ARGS=${XNU_ARGS:-cpus=1 touchscreen=1 gl=1}
+XNU_ARGS=${XNU_ARGS:-cpus=4 touchscreen=1 gl=1}
 # the device tree offers the kernel exactly this many cores; "cpus=" in XNU_ARGS should match
 CORES=${XNU_CORES:-$(expr "$XNU_ARGS" : '.*cpus=\([0-9]*\)' || echo 1)}
 [ -n "$CORES" ] || CORES=1
@@ -20,6 +20,15 @@ WATCH=${XNU_WATCH:-$((SECS + 240))}
 # a kernel that hangs costs a power cycle and not a rescue through BROM.
 TEST_FLAGS=(-DXNU_WDT_SECONDS=0 -DXNU_CORES=$CORES -DXNU_WATCH_SECONDS=$WATCH
 	"-DXNU_RETURN_AFTER=\"$SECS\"" "-DXNU_EXTRA_ARGS=\"$XNU_ARGS epoch=$(date +%s)\"")
+# The XNU log does not fit in the 256 KB the ramoops console keeps, so the loader saves the head
+# of the boot, a window from the middle, and the end of the run. XNU_LOG_OFFSET is where the
+# window starts and XNU_LOG_LEN how long it is; both are byte offsets into XNU's own log, which
+# is about 1 MB for a 120 s run. 0 turns the window off (head and tail only).
+LOG_OFFSET=${XNU_LOG_OFFSET:-0}
+LOG_LEN=${XNU_LOG_LEN:-262144}
+if [ "$LOG_OFFSET" -gt 0 ] 2>/dev/null; then
+	TEST_FLAGS+=("-DXNU_LOG_OFFSET=$LOG_OFFSET" "-DXNU_LOG_LEN=$LOG_LEN")
+fi
 "$ROOT/mtkloader/build.sh" "${TEST_FLAGS[@]}" "$@" >/dev/null
 # the payload (the XNU kernel and the small root) and the flashable image
 COMMON=${HAKIOS_COMMON:-$(cd "$ROOT/.." && pwd)/refs/hakios-xnu-kernel}

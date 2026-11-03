@@ -1480,20 +1480,102 @@ struct span {
 	uint64_t n;
 };
 
-/* Append spans (in order) to the ramoops console: all of it if it fits, else its start and
- * as much of its end as there is room for. */
+/*
+ * Append spans (in order) to the ramoops console.
+ *
+ * The log does not fit, so three pieces are kept: the head (the start of the boot), a window
+ * from the middle (XNU_LOG_OFFSET, XNU_LOG_LEN -- what the run was about), and the tail (the
+ * end of the run, where the panel's last swaps are). What is left out is marked.
+ */
 static void save_log(const struct span *sp, int nsp)
 {
 	uint64_t total = 0, room, head, tail, skip_to, at = 0;
+	static char diagnostics[32768];
+	char line[1024];
+	uint32_t used = 0, length = 0, dropped = 0;
+	int oversized = 0;
 
 	for (int i = 0; i < nsp; i++) {
 		total += sp[i].n;
+		for (uint64_t k = 0; k < sp[i].n; k++) {
+			char c = sp[i].p[k];
+			if (length < sizeof(line)) {
+				line[length++] = c ? c : ' ';
+			} else {
+				oversized = 1;
+			}
+			if (c != '\n') {
+				continue;
+			}
+			int wanted = 0;
+			const char *tags[] = { "usertrap:", "ustacks:" };
+			for (unsigned t = 0; t < 2; t++) {
+				uint32_t n = (uint32_t)strlen(tags[t]);
+				for (uint32_t j = 0; j + n <= length; j++) {
+					uint32_t match = 0;
+					while (match < n && line[j + match] == tags[t][match]) {
+						match++;
+					}
+					wanted |= match == n;
+				}
+			}
+			if (wanted) {
+				if (!oversized && length <= sizeof(diagnostics) - used) {
+					memcpy(diagnostics + used, line, length);
+					used += length;
+				} else {
+					dropped++;
+				}
+			}
+			length = 0;
+			oversized = 0;
+		}
 	}
 	room = PLOG_CAP > PLOG_HDR->size ? PLOG_CAP - PLOG_HDR->size : 0;
-	room = room > 1024 ? room - 1024 : 0;
+	/* The final framebuffer dump needs about 16 KiB after this capture. */
+	room = room > 20480 ? room - 20480 : 0;
+	room = room > 256 ? room - 256 : 0;
+	if (used > room) {
+		used = 0;
+		dropped++;
+	}
+	room -= used;
 	head = total <= room ? total : room / 4;
 	tail = total <= room ? 0 : room - head;
 	skip_to = total - tail;
+
+#ifdef XNU_LOG_OFFSET
+	uint64_t win_begin = (uint64_t)XNU_LOG_OFFSET;
+	uint64_t win_len = (uint64_t)XNU_LOG_LEN;
+
+	if (win_begin > total) {
+		win_begin = total;
+	}
+	if (win_len > total - win_begin) {
+		win_len = total - win_begin;
+	}
+	if (win_begin < head) {
+		/* the head already has it */
+		win_begin = head;
+	}
+	/* the head gives up most of its room to the window: the head is the start of the boot,
+	 * which is already known, and the window is what the run was about */
+	if (win_len > room / 2) {
+		win_len = room / 2;
+	}
+	if (win_len > total - win_begin) {
+		win_len = total - win_begin;
+	}
+	uint64_t win_end = win_begin + win_len;
+	if (tail > room - head - win_len) {
+		tail = room > head + win_len ? room - head - win_len : 0;
+	}
+	skip_to = total - tail;
+	if (skip_to < win_end) {
+		skip_to = win_end;
+		tail = total > skip_to ? total - skip_to : 0;
+	}
+#endif
 
 	uint64_t fb = fbc.base;
 	fbc.base = 0; /* the screen gets the tail, separately */
@@ -1506,10 +1588,33 @@ static void save_log(const struct span *sp, int nsp)
 				dbg_puts("\n\n[... ");
 				dbg_dec(skip_to - head);
 				dbg_puts(" bytes of the XNU log left out here ...]\n\n");
+#ifdef XNU_LOG_OFFSET
+				dbg_puts("\n=== XNU log window: bytes ");
+				dbg_dec(win_begin);
+				dbg_puts("..");
+				dbg_dec(win_end);
+				dbg_puts(" of ");
+				dbg_dec(total);
+				dbg_puts(" ===\n\n");
+#endif
 			}
+#ifdef XNU_LOG_OFFSET
+			if (at >= win_begin && at < win_end) {
+				char c = sp[i].p[k];
+				plog_putc(c ? c : ' ');
+			}
+#endif
 		}
 	}
 	plog_putc('\n');
+	if (used || dropped) {
+		dbg_puts("\n=== preserved diagnostic lines; dropped ");
+		dbg_dec(dropped);
+		dbg_puts(" ===\n");
+		for (uint32_t i = 0; i < used; i++) {
+			plog_putc(diagnostics[i]);
+		}
+	}
 	fbc.base = fb;
 }
 
@@ -1852,8 +1957,15 @@ static void read_screen(void)
 
 static uint8_t shot_pixels[SHOT_BYTES];
 
-/* Downsample the panel into shot_pixels. */
-static void shot_panel(void)
+#ifdef XNU_PANEL_SAMPLES
+static struct panel_sample {
+	uint8_t pixels[SHOT_BYTES];
+	uint32_t seconds;
+	volatile uint32_t ready;
+} panel_samples[4] __attribute__((aligned(64)));
+#endif
+
+static void shot_panel(uint8_t *pixels)
 {
 	uint32_t used = 0;
 
@@ -1867,15 +1979,15 @@ static void shot_panel(void)
 		for (uint32_t x = 0; x < SHOT_W; x++) {
 			uint32_t pixel = row[x * SHOT_STEP + SHOT_STEP / 2];
 
-			shot_pixels[used++] = (uint8_t) ((pixel >> 16) & 0xff);    /* R */
-			shot_pixels[used++] = (uint8_t) ((pixel >> 8) & 0xff);     /* G */
-			shot_pixels[used++] = (uint8_t) (pixel & 0xff);            /* B */
+			pixels[used++] = (uint8_t) ((pixel >> 16) & 0xff);    /* R */
+			pixels[used++] = (uint8_t) ((pixel >> 8) & 0xff);     /* G */
+			pixels[used++] = (uint8_t) (pixel & 0xff);            /* B */
 		}
 	}
 }
 
 /* The picture, as the host's tools/fbshot.py reads it. The number tells them apart. */
-static void shot_print(int number, const char *what)
+static void shot_print(int number, const char *what, const uint8_t *pixels)
 {
 	static const char digits[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 	uint64_t fb = fbc.base;
@@ -1896,8 +2008,8 @@ static void shot_print(int number, const char *what)
 		uint32_t k = 0;
 
 		for (uint32_t i = 0; i + 2 < n; i += 3) {
-			uint32_t v = (uint32_t) shot_pixels[at + i] << 16 |
-			    (uint32_t) shot_pixels[at + i + 1] << 8 | shot_pixels[at + i + 2];
+			uint32_t v = (uint32_t) pixels[at + i] << 16 |
+			    (uint32_t) pixels[at + i + 1] << 8 | pixels[at + i + 2];
 
 			line[k++] = digits[v >> 18 & 63];
 			line[k++] = digits[v >> 12 & 63];
@@ -1939,7 +2051,7 @@ void xnu_returned(uint64_t log_pa, uint64_t len, uint64_t reason, uint64_t code,
 		dcache_clean_range(fb_base, (uint64_t) fb_pitch * PANEL_H);
 	}
 	read_screen();
-	shot_panel();
+	shot_panel(shot_pixels);
 	fbc.base = screen;
 	fbc.fg = 0xffffff40u;
 	out("\n=== XNU returned to mtkloader: reason ");
@@ -1972,6 +2084,18 @@ void xnu_returned(uint64_t log_pa, uint64_t len, uint64_t reason, uint64_t code,
 		show_panic_string(&xsyms);
 		show_backtrace();
 	}
+#ifdef XNU_PANEL_SAMPLES
+	for (unsigned i = 0; i < 4; i++) {
+		dcache_clean_range((uint64_t)&panel_samples[i], sizeof(panel_samples[i]));
+		if (!panel_samples[i].ready) {
+			continue;
+		}
+		dbg_puts("panel sample at ");
+		dbg_dec(panel_samples[i].seconds);
+		dbg_puts(" seconds after watcher start\n");
+		shot_print(3 + i, "during XNU", panel_samples[i].pixels);
+	}
+#endif
 	out("=== XNU log (");
 	out_dec(len);
 	out(" bytes) ===\n");
@@ -1980,7 +2104,7 @@ void xnu_returned(uint64_t log_pa, uint64_t len, uint64_t reason, uint64_t code,
 	}
 	save_log(&sp, 1);
 	dbg_puts("=== end of XNU log ===\n");
-	shot_print(2, "the panel when XNU came back");
+	shot_print(2, "the panel when XNU came back", shot_pixels);
 	show_log_tail(40);
 	dbg_delay_ms(2000);
 	reset_board();
@@ -2253,7 +2377,11 @@ void watcher_main(void)
 	dcache_clean_range((uint64_t)&watcher_started, 8);
 
 	uint32_t watch_secs = (runtime_secs > 0) ? (runtime_secs + 240) : XNU_WATCH_SECONDS;
-	uint64_t end = dbg_ticks() + dbg_freq() * watch_secs;
+	uint64_t start = dbg_ticks();
+	uint64_t end = start + dbg_freq() * watch_secs;
+#ifdef XNU_PANEL_SAMPLES
+	unsigned sample = 0;
+#endif
 	while (dbg_ticks() < end) {
 		dcache_clean_range((uint64_t)&xnu_back, 8);
 		if (xnu_back) {
@@ -2261,6 +2389,17 @@ void watcher_main(void)
 				__asm__ volatile("wfe");
 			}
 		}
+#ifdef XNU_PANEL_SAMPLES
+		if (sample < 4 && dbg_ticks() - start >= dbg_freq() * (60 + 60 * sample)) {
+			struct panel_sample *s = &panel_samples[sample];
+			dcache_clean_range(fb_base, (uint64_t)fb_pitch * PANEL_H);
+			shot_panel(s->pixels);
+			s->seconds = (dbg_ticks() - start) / dbg_freq();
+			s->ready = 1;
+			dcache_clean_range((uint64_t)s, sizeof(*s));
+			sample++;
+		}
+#endif
 		dbg_delay_ms(100);
 	}
 	dcache_clean_range((uint64_t)&xnu_back, 8);
@@ -4347,8 +4486,8 @@ void mtkloader_main(uint64_t dtb)
 	if (fb_base && fb_pitch) {
 		dcache_clean_range(fb_base, (uint64_t) fb_pitch * PANEL_H);
 	}
-	shot_panel();
-	shot_print(1, "the panel before XNU ran");
+	shot_panel(shot_pixels);
+	shot_print(1, "the panel before XNU ran", shot_pixels);
 	out("== mtkloader: Darwin/XNU on X6739 (MT6893) ==\n");
 	fbc.fg = 0xffffffffu;
 	out("LK dtb ");
