@@ -155,6 +155,17 @@ exists on this phone, so the boot-request mechanism works.
 
 ## What this means for the port
 
+### The GPU is a Mali-G77, and it is a different architecture from the reference's
+
+The reference port's GPU is a Bifrost Mali-G52 at `0x13040000` with four power domains. This
+phone's is a Valhall Mali-G77 MC9: chip id `0x9080`, nine shader cores, registers at
+`0x13000000` (16 KiB), interrupts GIC SPI 362-366, its own clock gate in the `mfgcfg` syscon at
+`0x13fbf000`, and **seven** power domains (MFG0..MFG6) with the block's clock on the topckgen
+`mfg_sel` mux. Arm's kbase for it is a legacy **job-manager** build: there is no CSF firmware on
+the phone, and `GPU_ID` is a single identity register (version in bits 3:0/11:4/15:12, product in
+16..31) - there is no GPU_ID2. The full facts, the main issue and the order of work are in
+`docs/gpu-port-mt6893.md`; the constants live in `mtkloader/mtkmali6893.h`.
+
 ### The storage path is new work
 
 The reference MT6768 port reads its root filesystem out of the **eMMC** through MSDC0

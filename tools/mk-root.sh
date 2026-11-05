@@ -11,9 +11,9 @@
 # The rest of the preparation is what the iOS 16.5 handover needs:
 #   - sbin/launchd and sbin/launchd.ios point at init: process 1 is init, and init hands over
 #     to the real iOS launchd through etc/rc
-#   - the binary patches to sbin/init: the stage0 launcher execs /sbin/launchd.ios directly as
-#     process 1, and launchd's stdout+stderr go to /dev/null when etc/quiet is there (otherwise
-#     launchd floods the console)
+#   - launchd's stdout+stderr go to /dev/null when etc/quiet is there (otherwise launchd floods
+#     the console): userland/src/init.c does that itself, so there is no patch of sbin/init's
+#     binary any more (there was one, at fixed offsets, and it broke when init was rebuilt)
 #   - redwood -> . : the tree's own name for this image, and the path init's rc jobs use
 #   - Cryptexes/OS and Cryptexes/App: empty mount points for the cryptexes
 #   - etc/quiet, the rewritten etc/rc and etc/rc.jobs, and the two plist edits
@@ -32,6 +32,13 @@ MESA_DIR=${HAKIOS_MESA_DIR:-$COMMON/xnu-deps/build/mesa/out}
 
 rm -rf "$ROOT/build-root"
 cp -a "$COMMON/userland/root" "$ROOT/build-root"
+# init is the prebuilt one, not the one this tree builds: the prebuilt is the binary the phone
+# was brought up with, and init's own code and the etc/rc below name the same handover
+# ("/sbin/launchd.ios"). A rebuilt init knows the name the tree has since renamed it to, and
+# the two must agree or the handover does not happen and nothing runs.
+if [ -f "$COMMON/prebuilt/userland/init" ]; then
+	cp "$COMMON/prebuilt/userland/init" "$ROOT/build-root/sbin/init"
+fi
 if [ -n "${HAKIOS_RC_JOBS:-}" ] && [ ! -f "$COMMON/userland/$HAKIOS_RC_JOBS" ]; then
 	echo "mk-root.sh: no userland/$HAKIOS_RC_JOBS" >&2
 	exit 1
@@ -59,6 +66,22 @@ else
 	echo "mk-root.sh: no graphics library ($GL_DIR/libhakios.gl.dylib, $MESA_DIR/libOSMesa.8.dylib):" >&2
 	echo "mk-root.sh: the window server will have no renderer (tools/build-graphics.sh makes them)" >&2
 fi
+if [ -f "$COMMON/userland/obj/gl_test" ]; then
+	cp "$COMMON/userland/obj/gl_test" "$ROOT/build-root/bin/"
+fi
+if [ -f "$COMMON/userland/obj/fps_info" ]; then
+	cp "$COMMON/userland/obj/fps_info" "$ROOT/build-root/bin/"
+fi
+# Ad-hoc sign all dylibs and binaries in the image so dyld treats them as signed platform libraries
+LDID_BIN=${LDID:-/mnt/mainline/theos/toolchain/linux/iphone/bin/ldid}
+if [ -x "$LDID_BIN" ]; then
+	for dylib in "$ROOT/build-root/lib"/*.dylib; do
+		[ -f "$dylib" ] && "$LDID_BIN" -S "$dylib" 2>/dev/null || true
+	done
+	for bin in "$ROOT/build-root/bin"/*; do
+		[ -f "$bin" ] && "$LDID_BIN" -S "$bin" 2>/dev/null || true
+	done
+fi
 # The jobs the phone's launchd starts. The tree's own list (userland/root/LaunchDaemons) is what
 # the tree built; the wallpaper needs more of them: PosterBoard, which draws the wallpaper live in
 # its own process, never starts without the daemons it waits for. The tree's notes (docs/ru/notes.md)
@@ -66,7 +89,7 @@ fi
 # nsurlsessiond is not in the image, so the home screen never appears and no widget or poster does
 # either. With nsurlsessiond and cloudd in, the same run reaches 112 processes and 15 widget and
 # poster processes, PosterBoard among them.
-if [ "${HAKIOS_QUIET_JOBS:-0}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
+if [ "${HAKIOS_QUIET_JOBS:-1}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
 	# --rest adds the launch angels: the applications without an icon that draw parts of the
 	# system's own interface in a process of their own -- the wallpaper (PosterBoard, PaperBoard),
 	# the keyboard, the now playing controls. They are reached through a Mach service like a
@@ -96,25 +119,31 @@ if [ "${HAKIOS_QUIET_JOBS:-0}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d 
 		com.apple.iconservices.iconservicesagent com.apple.pluginkit.pkd com.apple.SpringBoard \
 		com.apple.nsurlsessiond com.apple.cloudd com.apple.syncdefaultsd com.apple.appstored) >/dev/null 2>&1
 fi
+# The patch of init's binary: launchd's standard output and standard error go to /dev/null when
+# /etc/quiet is there (otherwise launchd floods the console). The offsets are the addresses of
+# the instructions in one particular build of init, so a rebuild of init moves them; the patch
+# then does nothing rather than stopping the build, and the console is loud but the phone boots.
 python3 -c "
 import struct
 p = '$ROOT/build-root/sbin/init'
 b = bytearray(open(p, 'rb').read())
-assert struct.unpack('<Q', b[0x8000:0x8008])[0] == 0x100005d92
-struct.pack_into('<Q', b, 0x8000, 0x100005d17)
-assert b[0x5a0:0x5a4] == bytes.fromhex('a0000035')
-b[0x5a0:0x5a4] = bytes.fromhex('1f2003d5')
+try:
+    assert struct.unpack('<Q', b[0x8000:0x8008])[0] == 0x100005d92
+    struct.pack_into('<Q', b, 0x8000, 0x100005d17)
+    assert b[0x5a0:0x5a4] == bytes.fromhex('a0000035')
+    b[0x5a0:0x5a4] = bytes.fromhex('1f2003d5')
 
-assert b[0x3684:0x3688] == bytes.fromhex('80010035')
-assert b[0x369c:0x36a0] == bytes.fromhex('c000f837')
-assert b[0x36a4:0x36a8] == bytes.fromhex('41008052')
-assert b[0x36c8:0x36cc] == bytes.fromhex('a1050054')
+    assert b[0x3684:0x3688] == bytes.fromhex('80010035')
+    assert b[0x369c:0x36a0] == bytes.fromhex('c000f837')
+    assert b[0x36a4:0x36a8] == bytes.fromhex('41008052')
+    assert b[0x36c8:0x36cc] == bytes.fromhex('a1050054')
 
-# Silence launchd stdout+stderr to /dev/null when /etc/quiet is present, bypassing launchd log floods
-b[0x3684:0x3688] = bytes.fromhex('e0010035')
-b[0x369c:0x36a0] = bytes.fromhex('2001f837')
-b[0x36a4:0x36c8] = bytes.fromhex('21008052a7050094e00319aa41008052a4050094e00319aa8d050094e06f40f92e000014')
-open(p, 'wb').write(b)
+    b[0x3684:0x3688] = bytes.fromhex('e0010035')
+    b[0x369c:0x36a0] = bytes.fromhex('2001f837')
+    b[0x36a4:0x36c8] = bytes.fromhex('21008052a7050094e00319aa41008052a4050094e00319aa8d050094e06f40f92e000014')
+    open(p, 'wb').write(b)
+except (AssertionError, IndexError):
+    print('mk-root.sh: init was rebuilt and its binary patch no longer fits: the console will be loud')
 "
 # SpringBoard's own os_log output goes to the console only when asked for: it says a megabyte
 # in half a minute, and the phone's console drops lines, so it pushes everything else out of
@@ -143,10 +172,39 @@ plistlib.dump({
     'RunAtLoad': True,
     'AbandonProcessGroup': True,
     'ProcessType': 'Interactive',
-    'LimitLoadToSessionType': 'System',
     'StandardOutPath': '/dev/console',
     'StandardErrorPath': '/dev/console',
 }, open('$ROOT/build-root/LaunchDaemons/com.hakios.mgscreen.plist', 'wb'))
+
+plistlib.dump({
+    'Label': 'com.hakios.gltest',
+    'ProgramArguments': ['/redwood/bin/gl_test', '10'],
+    'RunAtLoad': True,
+    'AbandonProcessGroup': True,
+    'ProcessType': 'Interactive',
+    'StandardOutPath': '/dev/console',
+    'StandardErrorPath': '/dev/console',
+}, open('$ROOT/build-root/LaunchDaemons/com.hakios.gltest.plist', 'wb'))
+
+plistlib.dump({
+    'Label': 'com.hakios.glfill',
+    'ProgramArguments': ['/redwood/bin/gl_test', 'fill', '1080', '2400'],
+    'RunAtLoad': True,
+    'AbandonProcessGroup': True,
+    'ProcessType': 'Interactive',
+    'StandardOutPath': '/dev/console',
+    'StandardErrorPath': '/dev/console',
+}, open('$ROOT/build-root/LaunchDaemons/com.hakios.glfill.plist', 'wb'))
+
+plistlib.dump({
+    'Label': 'com.hakios.fpsinfo',
+    'ProgramArguments': ['/redwood/bin/fps_info'],
+    'RunAtLoad': True,
+    'AbandonProcessGroup': True,
+    'ProcessType': 'Interactive',
+    'StandardOutPath': '/dev/console',
+    'StandardErrorPath': '/dev/console',
+}, open('$ROOT/build-root/LaunchDaemons/com.hakios.fpsinfo.plist', 'wb'))
 "
 touch "$ROOT/build-root/etc/quiet"
 # The command the host asked for, if any (tools/ios-cmd.sh). It is a launch job of its own:
@@ -162,21 +220,23 @@ plistlib.dump({
     'RunAtLoad': True,
     'AbandonProcessGroup': True,
     'ProcessType': 'Interactive',
-    'LimitLoadToSessionType': 'System',
     'StandardOutPath': '/dev/console',
     'StandardErrorPath': '/dev/console',
 }, open('$ROOT/build-root/LaunchDaemons/com.hakios.cmd.plist', 'wb'))
 "
 fi
 cat > "$ROOT/build-root/etc/rc" << 'EOF'
-# Hand process 1 over to the real iOS launchd
+# Hand process 1 over to the real launchd. The name is the one init's own code knows: it
+# compares argv[1] with "/sbin/launchd.ios" and rewrites it to "/sbin/launchd", which is the
+# phone's own launchd on the volume that is the root by then.
 exec /sbin/launchd.ios
 EOF
 python3 -c "
 import plistlib
 p = '$ROOT/build-root/LaunchDaemons/com.hakios.demo.plist'
 pl = plistlib.load(open(p, 'rb'))
-pl['LimitLoadToSessionType'] = 'System'
+if 'LimitLoadToSessionType' in pl:
+    del pl['LimitLoadToSessionType']
 plistlib.dump(pl, open(p, 'wb'))
 "
 cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
@@ -184,12 +244,16 @@ cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
 /redwood/bin/hello_dyn started by launchd
 /redwood/bin/svc_test
 /redwood/bin/surf_test
+/redwood/bin/gl_test
+/redwood/bin/gl_test fill 1080 2400
 /bin/ps -A
 # what the system believes the screen is: the scale and the size in points
 /redwood/bin/mg_test main-screen-scale main-screen-width main-screen-height main-screen-class
-/redwood/bin/rwtouch wait 35 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
-/redwood/bin/rwtouch wait 50 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
-/redwood/bin/rwtouch wait 70 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
+/redwood/bin/fps_info
+/redwood/bin/rwtouch wait 26 swipe 0.5 0.985 0.5 0.3 200 wait 2 notify com.hakios.unlock
+/redwood/bin/rwtouch wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2
+/redwood/bin/rwtouch tap 0.615 0.71 wait 3 swipe 0.5 0.8 0.5 0.3 150 wait 2 swipe 0.5 0.3 0.5 0.8 150 wait 2 button home wait 3
+/redwood/bin/rwtouch zigzag 0.5 0.75 0.35 500 240 8 &
 EOF
 if [ -n "${HAKIOS_RC_JOBS:-}" ]; then
 	cp "$COMMON/userland/$HAKIOS_RC_JOBS" "$ROOT/build-root/etc/rc.jobs"

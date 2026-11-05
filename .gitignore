@@ -9,6 +9,7 @@ mtkloader/*.bin
 # the headers build.sh makes at build time and that must never be committed
 mtkloader/touchfw.h
 mtkloader/font8x16.h
+mtkloader/gpufw.h
 # the runs' logs
 logs/
 *.log

@@ -236,6 +236,7 @@ From the phone's own device tree (`refs/fdt-x6739.dtb`), not from the reference 
 | `docs/touchscreen-ft3681.md` | the FT3681's architecture |
 | `docs/handoff-touch-i2c0.md` | the touch work, in detail |
 | `docs/wifi-mt6893.md` | the conninfra Wi-Fi facts and plan |
+| `docs/gpu-port-mt6893.md` | the Mali-G77 GPU port: the facts, the main issue, the order of work |
 | `docs/ios-firmware.md` | the iOS image: where it comes from, how it is carved |
 | `docs/kernel-source-patches/` | the source-level patches, and the reasoning |
 | `device.conf` | the per-area status, in the common tree's format |

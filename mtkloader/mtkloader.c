@@ -1490,7 +1490,7 @@ struct span {
 static void save_log(const struct span *sp, int nsp)
 {
 	uint64_t total = 0, room, head, tail, skip_to, at = 0;
-	static char diagnostics[32768];
+	static char diagnostics[131072];
 	char line[1024];
 	uint32_t used = 0, length = 0, dropped = 0;
 	int oversized = 0;
@@ -1508,8 +1508,13 @@ static void save_log(const struct span *sp, int nsp)
 				continue;
 			}
 			int wanted = 0;
-			const char *tags[] = { "usertrap:", "ustacks:" };
-			for (unsigned t = 0; t < 2; t++) {
+			const char *tags[] = {
+				"usertrap:", "ustacks:", "inject_report:", "hakios: backboardd",
+				"hakios: finish_update", "hakios: render_update", "rwtouch:", "fps_info:", "gl_test:",
+				"hakios: unlock", "hakios: the server", "hakios: window server", "mali: the GPU is up",
+				"hakios: SpringBoard", "hakios: ignore_update_p", "hakios: display links"
+			};
+			for (unsigned t = 0; t < sizeof(tags) / sizeof(tags[0]); t++) {
 				uint32_t n = (uint32_t)strlen(tags[t]);
 				for (uint32_t j = 0; j + n <= length; j++) {
 					uint32_t match = 0;
@@ -1535,9 +1540,8 @@ static void save_log(const struct span *sp, int nsp)
 	/* The final framebuffer dump needs about 16 KiB after this capture. */
 	room = room > 20480 ? room - 20480 : 0;
 	room = room > 256 ? room - 256 : 0;
-	if (used > room) {
-		used = 0;
-		dropped++;
+	if (used > room * 3 / 4) {
+		used = room * 3 / 4;
 	}
 	room -= used;
 	head = total <= room ? total : room / 4;
@@ -4073,152 +4077,338 @@ static int boot_choice(void)
 }
 
 #if GPU_PROBE
-#include "mtkpwrap.h"
-#include "mtkmali.h"
+#include "mtkmali6893.h"
+#include "gpufw.h"
 
 static const char gpu_probe_flag[] = "DARWIN-X6739:GPU-PROBE";
 
-static void say_mv(const char *name, int on, uint16_t selector)
+/*
+ * What the GPU says about itself: which GPU it is, what it has, and whether its parts come up
+ * when they are asked to. A soft reset comes first, because that is what any driver does, and
+ * the GPU answers it with an interrupt bit.
+ */
+static void gpu_read(int touch)
 {
-	out(name);
-	out(on ? " on at " : " off, set for ");
-	out_dec(mt6358_millivolts(selector));
-	out(" mV");
+	uint32_t id = rd32(MALI_BASE + GPU_ID);
+	uint32_t shaders = rd32(MALI_BASE + SHADER_PRESENT_LO);
+	uint32_t tiler = rd32(MALI_BASE + TILER_PRESENT_LO);
+	uint32_t l2 = rd32(MALI_BASE + L2_PRESENT_LO);
+
+	out("GPU_ID ");
+	out_hex(id);
+	out(": ");
+	out(mali_name(id));
+	out(" r");
+	out_dec((id >> 12) & 0xf);
+	out("p");
+	out_dec((id >> 4) & 0xff);
+	out("\n  features ");
+	out_hex(rd32(MALI_BASE + GPU_FEATURES_LO));
+	out(", address spaces ");
+	out_hex(rd32(MALI_BASE + AS_PRESENT));
+	out(", job slots ");
+	out_hex(rd32(MALI_BASE + JS_PRESENT));
+	out("\n  shader cores ");
+	out_hex(shaders);
+	out(", tiler ");
+	out_hex(tiler);
+	out(", L2 ");
+	out_hex(l2);
+	out("\n");
+
+	if (!touch) {
+		/*
+		 * The GPU was already up: it is read and nothing is written to it, because a
+		 * reset or a power cycle here would leave the phone in a state the driver that
+		 * comes after this loader does not expect.
+		 */
+		out("  (read only: the GPU was already up)\n");
+		return;
+	}
+
+	wr32(MALI_BASE + GPU_IRQ_MASK, 0);
+	wr32(MALI_BASE + GPU_IRQ_CLEAR, 0xffffffffu);
+	wr32(MALI_BASE + GPU_COMMAND, GPU_COMMAND_SOFT_RESET);
+	out("soft reset: ");
+	out(mali_wait(MALI_BASE + GPU_IRQ_RAWSTAT, GPU_IRQ_RESET_COMPLETED, GPU_IRQ_RESET_COMPLETED, 100) ?
+	    "done\n" : "NO ANSWER\n");
+	wr32(MALI_BASE + GPU_IRQ_CLEAR, 0xffffffffu);
+
+	/* Its parts, each asked to power up and watched until it says it is ready. */
+	out("L2 power: ");
+	wr32(MALI_BASE + L2_PWRON_LO, l2);
+	out(mali_wait(MALI_BASE + L2_READY_LO, l2, l2, 50) ? "ready" : "NOT READY");
+	out(", tiler: ");
+	wr32(MALI_BASE + TILER_PWRON_LO, tiler);
+	out(mali_wait(MALI_BASE + TILER_READY_LO, tiler, tiler, 50) ? "ready" : "NOT READY");
+	out(", shader cores: ");
+	wr32(MALI_BASE + SHADER_PWRON_LO, shaders);
+	out(mali_wait(MALI_BASE + SHADER_READY_LO, shaders, shaders, 50) ? "ready" : "NOT READY");
+	out(" (");
+	out_hex(rd32(MALI_BASE + SHADER_READY_LO));
+	out(")\n");
 }
 
 /*
- * Wake the GPU and ask it what it is. Each step names what it is about to touch before touching
- * it, so if one hangs the panel keeps its last line; and whatever this switches on it switches
- * off again before Android runs, which expects the GPU as the preloader left it.
+ * One job on the GPU: the TTRX_3485 workaround's own chain, run through the MMU.
+ *
+ * The chain is Arm's own (it comes out of the phone's vendor module, in fw-gpu/, and the
+ * loader carries it as gpufw.h, which build.sh makes out of it). Arm's driver runs it at
+ * power-up: it programs an address space, copies the chain into it and points a job slot at
+ * it (mali_kbase_dummy_job_wa.c in the r32p1 tree). The recipe below is that driver's, with
+ * the register values it writes:
+ *
+ *   the chain lives at GPU address 0x100000000, which needs three levels of page table and a
+ *   leaf: L0[0], L1[4], L2[0], L3[0] (the index of a level is the address's bits, nine a
+ *   level, 4 KiB granules);
+ *   the leaf is read-only for the GPU (the blob's map flags say the processor writes it and
+ *   the GPU reads it), so the job must not write descriptors back: JS_CONFIG's bit 15;
+ *   the job goes to slot 0 with every shader core's affinity, and the slot's interrupt bit
+ *   says whether it finished or failed.
+ *
+ * The loader runs with the MMU and the caches off, so its addresses are the physical ones and
+ * what it writes is what the GPU reads. The pages are in its own .bss, which the start code
+ * has just cleared.
+ */
+#define GPU_JOB_PAGES      5               /* four levels of table and the chain's own page */
+#define GPU_JOB_PAGE       4096
+
+/* The MMU's address space 0, and the fields of its registers. */
+#define GPU_AS0(base)      (MALI_BASE + AS_BASE(0))
+
+/* The page table entries, in the shape Arm's driver writes them (mali_kbase_mmu_mode_aarch64.c). */
+#define GPU_PTE_TYPE       3ull            /* a pointer to the next level */
+#define GPU_LEAF_TYPE      3ull            /* the page itself, at the lowest level */
+#define GPU_ENTRY_AF       (1ull << 10)
+#define GPU_ENTRY_AP_RO    (3ull << 6)      /* the GPU may read it */
+#define GPU_ENTRY_NX       (1ull << 54)    /* it is data, not code */
+#define GPU_ENTRY_COUNT    (1ull << 55)    /* how many of this table's entries are valid */
+
+static uint8_t gpu_job_pages[GPU_JOB_PAGES * GPU_JOB_PAGE] __attribute__((aligned(GPU_JOB_PAGE)));
+
+static void gpu_job(void)
+{
+	uint64_t l0 = (uint64_t) gpu_job_pages;
+	uint64_t l1 = l0 + GPU_JOB_PAGE;
+	uint64_t l2 = l1 + GPU_JOB_PAGE;
+	uint64_t l3 = l2 + GPU_JOB_PAGE;
+	uint64_t chain = l3 + GPU_JOB_PAGE;
+	uint64_t as = GPU_AS0(0);
+	uint64_t slot = MALI_BASE + JS_BASE(GPU_JOB_SLOT);
+	uint64_t end = dbg_ticks() + dbg_freq() / 1000 * 500;
+	uint32_t raw = 0, features;
+
+	/* the MMU's own features register: the driver never decodes it either */
+	features = rd32(MALI_BASE + GPU_MMU_FEATURES);
+	out("the MMU's features ");
+	out_hex(features);
+	out("\n");
+
+	/* the chain's bytes, in a page of their own */
+	memcpy((void *) chain, gpu_fw_payload, sizeof(gpu_fw_payload));
+
+	/* and out of this core's cache, so the GPU reads what was written */
+	dcache_clean_range((uint64_t) gpu_job_pages, sizeof(gpu_job_pages));
+
+	/*
+	 * The page tables: the chain's address, 0x100000000, in four levels, and each
+	 * table carries in the unused bits 55:58 of its first three words how many of
+	 * its entries are valid -- the driver's own count (set_num_valid_entries()).
+	 */
+	*(volatile uint64_t *) (l0 + 0 * 8) = l1 | GPU_ENTRY_AF | GPU_PTE_TYPE | GPU_ENTRY_COUNT;
+	*(volatile uint64_t *) (l1 + 0 * 8) = GPU_ENTRY_COUNT;
+	*(volatile uint64_t *) (l1 + 4 * 8) = l2 | GPU_ENTRY_AF | GPU_PTE_TYPE;
+	*(volatile uint64_t *) (l2 + 0 * 8) = l3 | GPU_ENTRY_AF | GPU_PTE_TYPE | GPU_ENTRY_COUNT;
+	*(volatile uint64_t *) (l3 + 0 * 8) = chain | GPU_ENTRY_AF | GPU_ENTRY_AP_RO |
+	    GPU_ENTRY_NX | GPU_LEAF_TYPE | GPU_ENTRY_COUNT;
+	__asm__ volatile("dsb sy");
+
+	/*
+	 * The GPU's own caches may hold lines for the addresses the loader has just
+	 * written, so they are cleaned and invalidated before the GPU reads them.
+	 */
+	wr32(MALI_BASE + GPU_IRQ_CLEAR, 0xffffffffu);
+	wr32(MALI_BASE + GPU_COMMAND, GPU_COMMAND_CLEAN_INV_CACHES);
+	if (!mali_wait(MALI_BASE + GPU_IRQ_RAWSTAT, GPU_IRQ_CLEAN_CACHES_DONE,
+	    GPU_IRQ_CLEAN_CACHES_DONE, 100)) {
+		out("the GPU did not clean its caches (going on anyway)\n");
+	}
+	wr32(MALI_BASE + GPU_IRQ_CLEAR, 0xffffffffu);
+
+	/*
+	 * The address space, in the driver's order (kbase_mmu_hw_configure): the MMU
+	 * must be idle, then the address mode, the root table and the memory attributes
+	 * are written, then the update command.  The update is what makes the tables
+	 * live and what invalidates the TLB; the driver does not wait for it either,
+	 * so the loader waits a moment and reports what the MMU says afterwards.
+	 */
+	if (!mali_wait(as + AS_STATUS, AS_STATUS_AS_ACTIVE, 0, 100)) {
+		out("the MMU is busy\n");
+		return;
+	}
+	wr32(as + AS_TRANSCFG_LO, AS_TRANSCFG_ADRMODE_AARCH64_4K |
+	    AS_TRANSCFG_PTW_MEMATTR_WRITE_BACK | AS_TRANSCFG_PTW_R_ALLOCATE);
+	wr32(as + AS_TRANSCFG_HI, 0);
+	wr32(as + AS_TRANSTAB_LO, (uint32_t) (l0 & 0xffffffffu));
+	wr32(as + AS_TRANSTAB_HI, (uint32_t) (l0 >> 32));
+	wr32(as + AS_MEMATTR_LO, 0x888d8f88);
+	wr32(as + AS_MEMATTR_HI, 0x00004c8d);
+	wr32(as + AS_COMMAND, AS_COMMAND_UPDATE);
+
+	/*
+	 * The driver, after it has changed an address space's tables, tells the MMU to
+	 * flush the page table cache (AS_COMMAND_FLUSH_PT, mali_kbase_mmu.c:1694), and
+	 * the MMU takes commands in order: so the flush finishing means the update
+	 * before it has been applied.  The commands are written only while the MMU is
+	 * idle (wait_ready(), mali_kbase_mmu_hw_direct.c:126), so the same test is made
+	 * here before each one.
+	 */
+	if (!mali_wait(as + AS_STATUS, AS_STATUS_AS_ACTIVE, 0, 100)) {
+		out("the MMU is busy after the update\n");
+	} else {
+		wr32(as + AS_COMMAND, AS_COMMAND_FLUSH_PT);
+	}
+
+	/*
+	 * AS_ACTIVE says the MMU is working on a command.  It can already be clear when
+	 * the command has only just been written, so the MMU is watched until it has
+	 * been seen busy and then idle again: that is the point at which the tables
+	 * are live.
+	 */
+	{
+		uint64_t until = dbg_ticks() + dbg_freq() / 1000 * 100;
+		int seen_busy = 0;
+
+		while (dbg_ticks() < until) {
+			uint32_t status = rd32(as + AS_STATUS);
+
+			if (status & AS_STATUS_AS_ACTIVE) {
+				seen_busy = 1;
+			} else if (seen_busy) {
+				break;
+			}
+			dbg_delay_us(50);
+		}
+		out("the MMU's status after the update and the flush ");
+		out_hex(rd32(as + AS_STATUS));
+		out(seen_busy ? " (busy was seen, then it finished)\n" : " (no busy seen)\n");
+	}
+
+	/* the job: the chain at its address, every core, no descriptor write-back */
+	wr32(MALI_BASE + JOB_IRQ_MASK, 0);
+	wr32(MALI_BASE + JOB_IRQ_CLEAR, 0xffffffffu);
+	wr32(slot + JS_HEAD_NEXT_LO, (uint32_t) (GPU_JOB_CHAIN & 0xffffffffu));
+	wr32(slot + JS_HEAD_NEXT_HI, (uint32_t) (GPU_JOB_CHAIN >> 32));
+	wr32(slot + JS_AFFINITY_NEXT_LO, rd32(MALI_BASE + SHADER_PRESENT_LO));
+	wr32(slot + JS_AFFINITY_NEXT_HI, 0);
+	/*
+	 * JS_CONFIG's low bits are the address space the job runs in (the driver
+	 * writes kctx->as_nr there, unshifted); this is address space 0, the one the
+	 * tables above were put in.
+	 */
+	wr32(slot + JS_CONFIG_NEXT, JS_CONFIG_DISABLE_DESCRIPTOR_WR_BK | GPU_AS_NUMBER);
+	while (rd32(slot + JS_COMMAND_NEXT) != 0) {
+		if (dbg_ticks() > end) {
+			out("the job slot never came free\n");
+			return;
+		}
+	}
+	wr32(slot + JS_COMMAND_NEXT, JS_COMMAND_START);
+
+	/* and whether it finished */
+	do {
+		raw = rd32(MALI_BASE + JOB_IRQ_RAWSTAT);
+		if (raw & (JOB_IRQ_DONE(GPU_JOB_SLOT) | JOB_IRQ_FAILED(GPU_JOB_SLOT))) {
+			break;
+		}
+	} while (dbg_ticks() < end);
+	wr32(MALI_BASE + JOB_IRQ_CLEAR, raw);
+
+	if (raw & JOB_IRQ_DONE(GPU_JOB_SLOT)) {
+		out("the job finished: the GPU ran the chain\n");
+		return;
+	}
+	if (raw & JOB_IRQ_FAILED(GPU_JOB_SLOT)) {
+		out("the job failed. JS_STATUS ");
+		out_hex(rd32(slot + JS_STATUS));
+		out(", the MMU's interrupts ");
+		out_hex(rd32(MALI_BASE + MMU_IRQ_RAWSTAT));
+		out(", its fault status ");
+		out_hex(rd32(as + AS_FAULTSTATUS));
+		out(" at ");
+		out_hex(rd32(as + AS_FAULTADDRESS_LO));
+		out_hex(rd32(as + AS_FAULTADDRESS_HI));
+		out(", the second address ");
+		out_hex(rd32(as + AS_FAULTEXTRA_LO));
+		out_hex(rd32(as + AS_FAULTEXTRA_HI));
+		out("\n");
+		return;
+	}
+	out("the job did not answer\n");
+}
+
+/*
+ * Wake this board's GPU and ask it what it is.
+ *
+ * This is the MT6893's Mali-G77 (Valhall), not the reference board's Mali-G52 (Bifrost): the
+ * register map, the seven power domains and the clock mux are all different, and the numbers
+ * are in mtkmali6893.h with their sources. The rails are the preloader's business here -- this
+ * phone's GPU runs from an MT6315 buck and a PMIC LDO, and the loader has no access to either
+ * -- so nothing here touches a rail.
+ *
+ * Each step names what it is about to touch before touching it, so if one hangs the panel keeps
+ * its last line; and whatever this switches on it switches off again before Android runs, which
+ * expects the GPU as the preloader left it.
  */
 static void gpu_probe(void)
 {
-	uint16_t hwcid = 0, vgpu_con = 0, vgpu_dbg = 0, vgpu_sel = 0, vsram_con = 0, vsram_dbg = 0, vsram_sel = 0;
-	int we_lit_vgpu = 0, we_lit_vsram = 0, up = 0, stage = 0;
-	uint32_t status, status2, clk_cfg1;
+	int up = 0, stage = 0;
+	uint32_t clk_cfg5 = rd32(TOPCKGEN_BASE + CLK_CFG_5);
 
-	/* ---- the rails ---- */
-	out("PMIC: ");
-	if (!pwrap_read(MT6358_HWCID, &hwcid)) {
-		out("the wrapper does not answer (WACS2_EN ");
-		out_hex(rd32(PWRAP_BASE + PWRAP_WACS2_EN));
-		out(")\n");
-		return;
-	}
-	out("chip ");
-	out_hex(hwcid);
-	out("\n  ");
-	pwrap_read(MT6358_BUCK_VGPU_CON0, &vgpu_con);
-	pwrap_read(MT6358_BUCK_VGPU_DBG1, &vgpu_dbg);
-	pwrap_read(MT6358_BUCK_VGPU_ELR0, &vgpu_sel);
-	pwrap_read(MT6358_LDO_VSRAM_GPU_CON0, &vsram_con);
-	pwrap_read(MT6358_LDO_VSRAM_GPU_DBG1, &vsram_dbg);
-	pwrap_read(MT6358_LDO_VSRAM_CON3, &vsram_sel);
-	say_mv("VGPU", vgpu_dbg & 1, vgpu_sel);
-	out(", ");
-	say_mv("VSRAM_GPU", vsram_dbg & 1, vsram_sel);
-	out("\n");
-
-	/*
-	 * A rail that is off is switched on at the voltage it is already set for -- but only a
-	 * voltage a GPU can sensibly run at: nothing here chooses one.
-	 */
-	if (!(vsram_dbg & 1) || !(vgpu_dbg & 1)) {
-		uint32_t mv_gpu = mt6358_millivolts(vgpu_sel), mv_sram = mt6358_millivolts(vsram_sel);
-
-		if (mv_gpu < 575 || mv_gpu > 900 || mv_sram < 750 || mv_sram > 1000) {
-			out("  a rail is off and set for a voltage I will not switch on: stopping\n");
-			return;
-		}
-		if (!(vsram_dbg & 1)) {
-			out("  switching VSRAM_GPU on\n");
-			pwrap_write(MT6358_LDO_VSRAM_GPU_CON0, vsram_con | 1);
-			we_lit_vsram = 1;
-		}
-		if (!(vgpu_dbg & 1)) {
-			out("  switching VGPU on\n");
-			pwrap_write(MT6358_BUCK_VGPU_CON0, vgpu_con | 1);
-			we_lit_vgpu = 1;
-		}
-		dbg_delay_ms(2);
-		pwrap_read(MT6358_BUCK_VGPU_DBG1, &vgpu_dbg);
-		pwrap_read(MT6358_LDO_VSRAM_GPU_DBG1, &vsram_dbg);
-		out("  now VGPU ");
-		out(vgpu_dbg & 1 ? "on" : "STILL OFF");
-		out(", VSRAM_GPU ");
-		out(vsram_dbg & 1 ? "on" : "STILL OFF");
-		out("\n");
-		if (!(vgpu_dbg & 1) || !(vsram_dbg & 1)) {
-			goto rails_off;
-		}
-	}
-
-	/*
-	 * ---- the processor, as LK left it: read only ----
-	 * The three CPU PLLs (Linux clk-mt6768.c: CON1 holds a 22-bit multiplier of 26 MHz / 2^14 and
-	 * a power-of-two post divider in bits 24..26) and the two PMIC rails the clusters run on.
-	 */
-	{
-		static const struct { const char *name; uint32_t con1; } plls[3] = {
-			{ "ARMPLL (big)", 0x20c }, { "ARMPLL_L (little)", 0x21c }, { "CCIPLL (bus)", 0x22c },
-		};
-		uint16_t v11 = 0, v12 = 0, s11 = 0, s12 = 0;
-
-		for (int i = 0; i < 3; i++) {
-			uint32_t c = rd32(0x1000c000ULL + plls[i].con1);
-			uint64_t mhz = (26ull * (c & 0x3fffffu)) >> 14;
-
-			mhz >>= (c >> 24) & 7u;
-			out(plls[i].name);
-			out(": CON1 ");
-			out_hex(c);
-			out(" = ");
-			out_dec((uint32_t)mhz);
-			out(" MHz\n");
-		}
-		pwrap_read(0x139e, &v11);               /* VPROC11_DBG0: the voltage it is at */
-		pwrap_read(0x141e, &v12);               /* VPROC12_DBG0 */
-		pwrap_read(0x1b60, &s11);               /* VSRAM_PROC11_DBG0 (bits 14..8) */
-		out("VPROC11 ");
-		out_dec(mt6358_millivolts(v11));
-		out(" mV, VPROC12 ");
-		out_dec(mt6358_millivolts(v12));
-		out(" mV, VSRAM_PROC11 ");
-		out_dec(mt6358_millivolts((uint16_t)(s11 >> 8)));
-		out(" mV\n");
-		(void)s12;
-	}
+	out("the rails are the preloader's here; this probe touches none\n");
 
 	/* ---- what the preloader left ---- */
-	status = rd32(SPM_BASE + SPM_PWR_STATUS);
-	status2 = rd32(SPM_BASE + SPM_PWR_STATUS_2ND);
-	clk_cfg1 = rd32(TOPCKGEN_BASE + CLK_CFG_1);
 	out("SPM power status ");
-	out_hex(status);
+	out_hex(rd32(SCPSYS_BASE + GPU_SPM_PWR_STATUS));
 	out(" / ");
-	out_hex(status2);
+	out_hex(rd32(SCPSYS_BASE + GPU_GPU_SPM_PWR_STATUS_2ND));
 	out(", mfg_sel ");
-	out_hex(clk_cfg1 & 0xff);
+	out_hex(clk_cfg5 & 0xff);
 	out(", bus protection ");
-	out_hex(rd32(INFRACFG_BASE + INFRA_TOPAXI_PROTECTEN_STA1));
+	out_hex(rd32(INFRACFG_BASE + mali_bus_steps[0].sta));
 	out("\n");
-	for (int i = 0; i < 4; i++) {
-		if (status & mali_domains[i].status) {
+	/*
+	 * If the GPU is already up -- the preloader left it that way -- it is read and nothing
+	 * else: switching a domain off that was not switched on by this probe would leave the
+	 * phone in a state Android's driver does not expect.
+	 */
+	int already_on = 0;
+
+	for (int i = 0; i < 7; i++) {
+		if (rd32(SCPSYS_BASE + GPU_SPM_PWR_STATUS) & mali_domains[i].status) {
 			out("  ");
 			out(mali_domains[i].name);
-			out(" is on already; leaving the GPU alone\n");
-			goto rails_off;
+			out(" is on already\n");
+			already_on = 1;
 		}
+	}
+	if (already_on) {
+		out("  the GPU is already up; it is read, not switched\n");
+		gpu_read(0);
+		out("GPU probe done\n");
+		return;
 	}
 
 	/* ---- the clock, then the power ---- */
-	out("mfg_sel to syspll_d3 (364 MHz)\n");
-	wr32(TOPCKGEN_BASE + CLK_CFG_1_CLR, MFG_SEL_FIELD | MFG_SEL_PDN);
-	wr32(TOPCKGEN_BASE + CLK_CFG_1_SET, MFG_SEL_SYSPLL_D3);
+	out("mfg_sel to mainpll_d5_d2 (218 MHz)\n");
+	wr32(TOPCKGEN_BASE + CLK_CFG_5_CLR,
+	    ((3u << MFG_SEL_LSB) & ((1u << MFG_SEL_WIDTH) - 1)) | MFG_SEL_PDN);
+	wr32(TOPCKGEN_BASE + CLK_CFG_5_SET, MFG_SEL_MAINPLL_D5_D2 << MFG_SEL_LSB);
+	wr32(TOPCKGEN_BASE + CLK_CFG_UPDATE, rd32(TOPCKGEN_BASE + CLK_CFG_UPDATE) | CLK_CFG_UPDATE_MFG);
 	__asm__ volatile("dsb sy");
 	dbg_delay_us(10);
 
-	for (up = 0; up < 4; up++) {
+	for (up = 0; up < 7; up++) {
 		const struct mali_domain *d = &mali_domains[up];
 
 		out("  powering ");
@@ -4228,9 +4418,9 @@ static void gpu_probe(void)
 			out("stalled at step ");
 			out_dec((uint32_t)stage);
 			out(", its control ");
-			out_hex(rd32(SPM_BASE + d->con));
+			out_hex(rd32(SCPSYS_BASE + d->con));
 			out(", status ");
-			out_hex(rd32(SPM_BASE + SPM_PWR_STATUS));
+			out_hex(rd32(SCPSYS_BASE + GPU_SPM_PWR_STATUS));
 			out("\n");
 			mali_domain_off(d);             /* whatever half of it did come up */
 			break;
@@ -4238,152 +4428,41 @@ static void gpu_probe(void)
 		out("on\n");
 		if (up == 1) {
 			out("  opening the bus to the GPU block\n");
-			mali_bus_open();
+			if (!mali_bus_open()) {
+				out("  the bus protection did not open; stopping\n");
+				break;
+			}
 		}
 	}
-	if (up < 4) {
+	if (up < 7) {
 		goto power_off;
 	}
 
 	/* ---- inside the block ---- */
 	out("mfgcfg clock gates ");
-	out_hex(rd32(MFGCFG_BASE + MFG_CG_CON));
+	out_hex(rd32(MFGCFG_BASE + MFG_CG_STA));
 	wr32(MFGCFG_BASE + MFG_CG_CLR, MFG_CG_BG3D);
 	__asm__ volatile("dsb sy");
 	out(" -> ");
-	out_hex(rd32(MFGCFG_BASE + MFG_CG_CON));
+	out_hex(rd32(MFGCFG_BASE + MFG_CG_STA));
 	out("\n");
 
-	{
-		uint32_t id = rd32(MALI_BASE + GPU_ID);
-		uint32_t shaders = rd32(MALI_BASE + GPU_SHADER_PRESENT);
-		uint32_t tiler = rd32(MALI_BASE + GPU_TILER_PRESENT);
-		uint32_t l2 = rd32(MALI_BASE + GPU_L2_PRESENT);
+	gpu_read(1);
 
-		out("GPU_ID ");
-		out_hex(id);
-		out(": ");
-		out(mali_name(id));
-		out(" r");
-		out_dec((id >> 12) & 0xf);
-		out("p");
-		out_dec((id >> 4) & 0xff);
-		out("\n  L2 features ");
-		out_hex(rd32(MALI_BASE + GPU_L2_FEATURES));
-		out(", tiler ");
-		out_hex(rd32(MALI_BASE + GPU_TILER_FEATURES));
-		out(", memory ");
-		out_hex(rd32(MALI_BASE + GPU_MEM_FEATURES));
-		out(", MMU ");
-		out_hex(rd32(MALI_BASE + GPU_MMU_FEATURES));
-		out("\n  address spaces ");
-		out_hex(rd32(MALI_BASE + GPU_AS_PRESENT));
-		out(", job slots ");
-		out_hex(rd32(MALI_BASE + GPU_JS_PRESENT));
-		out(", threads ");
-		out_dec(rd32(MALI_BASE + GPU_THREAD_MAX));
-		out("\n  shader cores ");
-		out_hex(shaders);
-		out(", tiler ");
-		out_hex(tiler);
-		out(", L2 ");
-		out_hex(l2);
-		out("\n");
-
-		/* A soft reset: what any driver does first, and the GPU answers it with an interrupt bit. */
-		wr32(MALI_BASE + GPU_INT_MASK, 0);
-		wr32(MALI_BASE + GPU_INT_CLEAR, 0xffffffffu);
-		wr32(MALI_BASE + GPU_CMD, GPU_CMD_SOFT_RESET);
-		out("soft reset: ");
-		out(mali_wait(MALI_BASE + GPU_INT_RAWSTAT, GPU_IRQ_RESET_COMPLETED, GPU_IRQ_RESET_COMPLETED, 100) ?
-		    "done\n" : "NO ANSWER\n");
-		wr32(MALI_BASE + GPU_INT_CLEAR, 0xffffffffu);
-
-		/* Its parts, each asked to power up and watched until it says it is ready. */
-		out("L2 power: ");
-		wr32(MALI_BASE + GPU_L2_PWRON, l2);
-		out(mali_wait(MALI_BASE + GPU_L2_READY, l2, l2, 50) ? "ready" : "NOT READY");
-		out(", tiler: ");
-		wr32(MALI_BASE + GPU_TILER_PWRON, tiler);
-		out(mali_wait(MALI_BASE + GPU_TILER_READY, tiler, tiler, 50) ? "ready" : "NOT READY");
-		out(", shader cores: ");
-		wr32(MALI_BASE + GPU_SHADER_PWRON, shaders);
-		out(mali_wait(MALI_BASE + GPU_SHADER_READY, shaders, shaders, 50) ? "ready" : "NOT READY");
-		out(" (");
-		out_hex(rd32(MALI_BASE + GPU_SHADER_READY));
-		out(")\n");
-
-		/*
-		 * The first job. Address space 0 is put in identity mode -- no page tables yet, a
-		 * GPU address is the physical one -- and slot 1 is given one job: write 0xc0ffee01
-		 * into a word of DRAM that the processor cleared. The processor reading it back is
-		 * the GPU's job manager, its MMU and its path to memory all working at once.
-		 */
-		{
-			volatile uint32_t *job = (volatile uint32_t *)0x50000000ULL;
-			volatile uint32_t *target = (volatile uint32_t *)0x50001000ULL;
-			uint64_t as = MALI_BASE + AS0_BASE, js = MALI_BASE + JS_BASE(1);
-			uint32_t raw;
-
-			for (int i = 0; i < 16; i++) {
-				job[i] = 0;
-			}
-			*target = 0;
-			job[4] = (MALI_JOB_WRITE_VALUE << 1) | 1u;        /* 64-bit pointers */
-			job[4] |= 1u << 16;                                /* job index 1 */
-			job[8] = 0x50001000u;                              /* where */
-			job[9] = 0;
-			job[10] = MALI_WRITE_IMM32;                        /* what kind of value */
-			job[12] = 0xc0ffee01u;                             /* the value */
-			__asm__ volatile("dsb sy");
-
-			wr32(as + AS_TRANSCFG_LO, AS_TRANSCFG_IDENTITY);
-			wr32(as + AS_TRANSCFG_HI, 0);
-			wr32(as + AS_MEMATTR_LO, 0x88888888u);
-			wr32(as + AS_MEMATTR_HI, 0x88888888u);
-			wr32(as + AS_COMMAND, AS_COMMAND_UPDATE);
-			out("MMU address space 0 (identity): ");
-			out(mali_wait(as + AS_STATUS, AS_STATUS_ACTIVE, 0, 50) ? "set\n" : "STILL BUSY\n");
-
-			wr32(MALI_BASE + JOB_INT_MASK, 0);
-			wr32(MALI_BASE + JOB_INT_CLEAR, 0xffffffffu);
-			wr32(js + JS_HEAD_NEXT_LO, 0x50000000u);
-			wr32(js + JS_HEAD_NEXT_HI, 0);
-			wr32(js + JS_AFFINITY_NEXT_LO, shaders);
-			wr32(js + JS_AFFINITY_NEXT_HI, 0);
-			wr32(js + JS_CONFIG_NEXT, JS_CONFIG_AS0_FLUSHED);
-			wr32(js + JS_COMMAND_NEXT, JS_COMMAND_START);
-			mali_wait(MALI_BASE + JOB_INT_RAWSTAT, (1u << 1) | (1u << 17), 0xffffffffu, 100);
-			raw = rd32(MALI_BASE + JOB_INT_RAWSTAT);
-			out("job: interrupts ");
-			out_hex(raw);
-			out(", slot status ");
-			out_hex(rd32(js + JS_STATUS));
-			out(", MMU fault ");
-			out_hex(rd32(as + AS_FAULTSTATUS));
-			out(" at ");
-			out_hex(rd32(as + AS_FAULTADDRESS_LO));
-			out(", job's own status ");
-			out_hex(job[0]);
-			out("\n  the word the GPU was to write: ");
-			out_hex(*target);
-			out(*target == 0xc0ffee01u ? "  <- THE GPU RAN A JOB\n" : "  (not written)\n");
-			wr32(MALI_BASE + JOB_INT_CLEAR, 0xffffffffu);
-		}
-
-		/* And back down, inside out. */
-		wr32(MALI_BASE + GPU_SHADER_PWROFF, shaders);
-		mali_wait(MALI_BASE + GPU_SHADER_READY, shaders, 0, 50);
-		wr32(MALI_BASE + GPU_TILER_PWROFF, tiler);
-		mali_wait(MALI_BASE + GPU_TILER_READY, tiler, 0, 50);
-		wr32(MALI_BASE + GPU_L2_PWROFF, l2);
-		mali_wait(MALI_BASE + GPU_L2_READY, l2, 0, 50);
+	/*
+	 * The job: Arm's own chain, through the MMU, in the slot the blob names.  The
+	 * blob's payload is the chain; without it there is nothing to run.
+	 */
+	if (GPU_JOB_CHAIN) {
+		gpu_job();
+	} else {
+		out("no GPU blob: the job is not run\n");
 	}
-	wr32(MFGCFG_BASE + MFG_CG_SET, MFG_CG_BG3D);
-	__asm__ volatile("dsb sy");
 
 power_off:
 	/* Everything that came up goes down again, the cores first and the bridge last. */
+	wr32(MFGCFG_BASE + MFG_CG_SET, MFG_CG_BG3D);
+	__asm__ volatile("dsb sy");
 	while (up-- > 0) {
 		const struct mali_domain *d = &mali_domains[up];
 
@@ -4395,17 +4474,11 @@ power_off:
 		out(d->name);
 		out(mali_domain_off(d) ? " off\n" : " off: NO ANSWER\n");
 	}
-	wr32(TOPCKGEN_BASE + CLK_CFG_1_CLR, MFG_SEL_FIELD | MFG_SEL_PDN);
-	wr32(TOPCKGEN_BASE + CLK_CFG_1_SET, clk_cfg1 & (MFG_SEL_FIELD | MFG_SEL_PDN));
+	wr32(TOPCKGEN_BASE + CLK_CFG_5_CLR,
+	    ((3u << MFG_SEL_LSB) & ((1u << MFG_SEL_WIDTH) - 1)) | MFG_SEL_PDN);
+	wr32(TOPCKGEN_BASE + CLK_CFG_5_SET, clk_cfg5 & (((1u << MFG_SEL_WIDTH) - 1) << MFG_SEL_LSB));
 	__asm__ volatile("dsb sy");
 
-rails_off:
-	if (we_lit_vgpu) {
-		pwrap_write(MT6358_BUCK_VGPU_CON0, vgpu_con & ~1u);
-	}
-	if (we_lit_vsram) {
-		pwrap_write(MT6358_LDO_VSRAM_GPU_CON0, vsram_con & ~1u);
-	}
 	out("GPU probe done\n");
 }
 #endif /* GPU_PROBE */
