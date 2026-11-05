@@ -89,7 +89,7 @@ fi
 # nsurlsessiond is not in the image, so the home screen never appears and no widget or poster does
 # either. With nsurlsessiond and cloudd in, the same run reaches 112 processes and 15 widget and
 # poster processes, PosterBoard among them.
-if [ "${HAKIOS_QUIET_JOBS:-1}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
+if [ "${HAKIOS_QUIET_JOBS:-0}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d "$COMMON/sysimage/rootfs" ]; then
 	# --rest adds the launch angels: the applications without an icon that draw parts of the
 	# system's own interface in a process of their own -- the wallpaper (PosterBoard, PaperBoard),
 	# the keyboard, the now playing controls. They are reached through a Mach service like a
@@ -197,16 +197,16 @@ cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
 /redwood/bin/hello_dyn started by launchd
 /redwood/bin/svc_test
 /redwood/bin/surf_test
-/redwood/bin/gl_test fill 1080 2400
-/redwood/bin/gl_test 4
 # what the system believes the screen is: the scale and the size in points
 /redwood/bin/mg_test main-screen-scale main-screen-width main-screen-height main-screen-class DeviceSupports120HzRefreshRate MaxRefreshRate main-screen-refresh-rate DeviceSupportsProMotion
 /redwood/bin/fps_info
 /bin/ps -A
-/redwood/bin/rwtouch wait 26 swipe 0.5 0.985 0.5 0.3 200 wait 2 notify com.hakios.unlock
-/redwood/bin/rwtouch wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2
-/redwood/bin/rwtouch tap 0.615 0.71 wait 3 swipe 0.5 0.8 0.5 0.3 150 wait 2 swipe 0.5 0.3 0.5 0.8 150 wait 2 button home wait 3
-/redwood/bin/rwtouch zigzag 0.5 0.75 0.35 500 240 8 &
+/redwood/bin/rwtouch wait 35 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
+/redwood/bin/rwtouch wait 50 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
+/redwood/bin/rwtouch wait 70 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
+/redwood/bin/rwtouch wait 140 tap 0.5 0.5 wait 1 swipe 0.8 0.5 0.2 0.5 250 &
+/redwood/bin/rwtouch wait 170 tap 0.5 0.5 wait 1 swipe 0.2 0.5 0.8 0.5 250 &
+/redwood/bin/rwtouch wait 200 tap 0.5 0.5 wait 1 swipe 0.5 0.3 0.5 0.8 250 &
 EOF
 if [ -n "${HAKIOS_RC_JOBS:-}" ]; then
 	cp "$COMMON/userland/$HAKIOS_RC_JOBS" "$ROOT/build-root/etc/rc.jobs"
