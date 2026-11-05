@@ -75,20 +75,14 @@ struct mali_bus_step {
 /* ---- the GPU's own registers ---- */
 
 /*
- * One identity register: GPU_ID holds the version and the model. This phone reads 0x90800011.
- * Its bits 31:16 hold the model, as Arm's GPU_ID2_MODEL_MAKE(arch major, product major):
- * arch major 9 (Valhall) in bits 31:28 and the product's code in bits 23:16.
- *
- * The product id that Mesa's panfrost names the GPU by is that model made whole:
- * (arch major << 12) | (product code), which for this GPU is 0x9080 -- the row
- * tools/mesa/panfrost-g77.patch adds to Mesa's table. The register's own value, 0x90800011, is
- * not that number and does not name the GPU to Mesa.
+ * One identity register: GPU_ID holds the version and the model. The model is
+ * ((id >> 16) & 0xf00f): arch major in bits 31:28, product major in bits 19:16. This phone
+ * reads 0x90800011: arch major 9 (Valhall), product major 0 -- the G77.
  */
 #define GPU_ID                0x000
 #define GPU_ID_MODEL         0xf00f0000u
 #define GPU_ID_ARCH_MAJOR    (0xfu << 28)
-#define GPU_ID_PRODUCT_MAJOR (0xfu << 20)
-#define GPU_ID_PRODUCT_MINOR (0xfu << 16)
+#define GPU_ID_PRODUCT_MAJOR (0xfu << 16)
 
 #define GPU_IRQ_RAWSTAT       0x020
 #define GPU_IRQ_CLEAR         0x024
@@ -147,9 +141,12 @@ struct mali_bus_step {
 #define JS_BASE(n)            (0x1800u + (n) * 0x80u)
 #define JS_HEAD_LO            0x00
 #define JS_HEAD_HI            0x04
+#define JS_TAIL_LO            0x08
+#define JS_TAIL_HI            0x0c
 #define JS_AFFINITY_LO        0x10
 #define JS_AFFINITY_HI        0x14
 #define JS_CONFIG             0x18
+#define JS_XAFFINITY          0x1c
 #define JS_COMMAND            0x20
 #define JS_STATUS             0x24
 #define JS_HEAD_NEXT_LO       0x40
@@ -204,6 +201,8 @@ struct mali_bus_step {
 #define AS_TRANSTAB_HI        0x04
 #define AS_MEMATTR_LO         0x08
 #define AS_MEMATTR_HI         0x0c
+#define AS_LOCKADDR_LO        0x10
+#define AS_LOCKADDR_HI        0x14
 #define AS_COMMAND            0x18
 #define AS_FAULTSTATUS        0x1c
 #define AS_FAULTADDRESS_LO    0x20
@@ -215,7 +214,10 @@ struct mali_bus_step {
 #define AS_FAULTEXTRA_HI      0x3c
 
 #define AS_COMMAND_UPDATE     0x01
+#define AS_COMMAND_LOCK       0x02
+#define AS_COMMAND_UNLOCK     0x03
 #define AS_COMMAND_FLUSH_PT   0x04
+#define AS_COMMAND_FLUSH_MEM  0x05
 #define AS_STATUS_AS_ACTIVE   (1u << 0)
 
 #define AS_TRANSCFG_ADRMODE_AARCH64_4K  6u

@@ -159,53 +159,6 @@ env['OS_ACTIVITY_MODE'] = 'debug'
 plistlib.dump(pl, open(p, 'wb'))
 "
 fi
-# A job of its own for the screen's own numbers. The job runner (etc/rc.jobs) cannot show
-# them: init's patch sends its own standard output to /dev/null when etc/quiet is there,
-# and the phone's console drops lines anyway. A launch job with the console as its
-# standard output is what the tree does for its daemons.
-python3 -c "
-import plistlib
-plistlib.dump({
-    'Label': 'com.hakios.mgscreen',
-    'ProgramArguments': ['/redwood/bin/mg_test', 'main-screen-scale', 'main-screen-width',
-                         'main-screen-height', 'main-screen-class'],
-    'RunAtLoad': True,
-    'AbandonProcessGroup': True,
-    'ProcessType': 'Interactive',
-    'StandardOutPath': '/dev/console',
-    'StandardErrorPath': '/dev/console',
-}, open('$ROOT/build-root/LaunchDaemons/com.hakios.mgscreen.plist', 'wb'))
-
-plistlib.dump({
-    'Label': 'com.hakios.gltest',
-    'ProgramArguments': ['/redwood/bin/gl_test', '10'],
-    'RunAtLoad': True,
-    'AbandonProcessGroup': True,
-    'ProcessType': 'Interactive',
-    'StandardOutPath': '/dev/console',
-    'StandardErrorPath': '/dev/console',
-}, open('$ROOT/build-root/LaunchDaemons/com.hakios.gltest.plist', 'wb'))
-
-plistlib.dump({
-    'Label': 'com.hakios.glfill',
-    'ProgramArguments': ['/redwood/bin/gl_test', 'fill', '1080', '2400'],
-    'RunAtLoad': True,
-    'AbandonProcessGroup': True,
-    'ProcessType': 'Interactive',
-    'StandardOutPath': '/dev/console',
-    'StandardErrorPath': '/dev/console',
-}, open('$ROOT/build-root/LaunchDaemons/com.hakios.glfill.plist', 'wb'))
-
-plistlib.dump({
-    'Label': 'com.hakios.fpsinfo',
-    'ProgramArguments': ['/redwood/bin/fps_info'],
-    'RunAtLoad': True,
-    'AbandonProcessGroup': True,
-    'ProcessType': 'Interactive',
-    'StandardOutPath': '/dev/console',
-    'StandardErrorPath': '/dev/console',
-}, open('$ROOT/build-root/LaunchDaemons/com.hakios.fpsinfo.plist', 'wb'))
-"
 touch "$ROOT/build-root/etc/quiet"
 # The command the host asked for, if any (tools/ios-cmd.sh). It is a launch job of its own:
 # the job runner (etc/rc.jobs) cannot show its output, because init's patch sends its own
@@ -220,6 +173,7 @@ plistlib.dump({
     'RunAtLoad': True,
     'AbandonProcessGroup': True,
     'ProcessType': 'Interactive',
+    'LimitLoadToSessionType': 'System',
     'StandardOutPath': '/dev/console',
     'StandardErrorPath': '/dev/console',
 }, open('$ROOT/build-root/LaunchDaemons/com.hakios.cmd.plist', 'wb'))
@@ -235,8 +189,7 @@ python3 -c "
 import plistlib
 p = '$ROOT/build-root/LaunchDaemons/com.hakios.demo.plist'
 pl = plistlib.load(open(p, 'rb'))
-if 'LimitLoadToSessionType' in pl:
-    del pl['LimitLoadToSessionType']
+pl['LimitLoadToSessionType'] = 'System'
 plistlib.dump(pl, open(p, 'wb'))
 "
 cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
@@ -244,12 +197,12 @@ cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
 /redwood/bin/hello_dyn started by launchd
 /redwood/bin/svc_test
 /redwood/bin/surf_test
-/redwood/bin/gl_test
 /redwood/bin/gl_test fill 1080 2400
-/bin/ps -A
+/redwood/bin/gl_test 4
 # what the system believes the screen is: the scale and the size in points
-/redwood/bin/mg_test main-screen-scale main-screen-width main-screen-height main-screen-class
+/redwood/bin/mg_test main-screen-scale main-screen-width main-screen-height main-screen-class DeviceSupports120HzRefreshRate MaxRefreshRate main-screen-refresh-rate DeviceSupportsProMotion
 /redwood/bin/fps_info
+/bin/ps -A
 /redwood/bin/rwtouch wait 26 swipe 0.5 0.985 0.5 0.3 200 wait 2 notify com.hakios.unlock
 /redwood/bin/rwtouch wait 1 swipe 0.85 0.5 0.15 0.5 300 wait 2 swipe 0.15 0.5 0.85 0.5 300 wait 2
 /redwood/bin/rwtouch tap 0.615 0.71 wait 3 swipe 0.5 0.8 0.5 0.3 150 wait 2 swipe 0.5 0.3 0.5 0.8 150 wait 2 button home wait 3

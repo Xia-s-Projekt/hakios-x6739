@@ -218,9 +218,41 @@ mali_bus_close(void)
  */
 static uint64_t * pt_top;
 static uint64_t pt_top_phys;
-static uint64_t * pt_levels[4][GPU_TABLE_ENTRIES];
-static uint64_t pt_level_phys[4][GPU_TABLE_ENTRIES];
-static uint32_t pt_level_used[4][GPU_TABLE_ENTRIES];
+
+struct pt_map_entry {
+	uint64_t phys;
+	uint64_t * va;
+};
+#define PT_MAP_CAP 4096
+static struct pt_map_entry pt_map_table[PT_MAP_CAP];
+
+static uint64_t *
+pt_lookup(uint64_t phys)
+{
+	uint32_t hash = ((phys >> 12) * 2654435761u) & (PT_MAP_CAP - 1);
+	while (pt_map_table[hash].va != NULL) {
+		if (pt_map_table[hash].phys == phys) {
+			return pt_map_table[hash].va;
+		}
+		hash = (hash + 1) & (PT_MAP_CAP - 1);
+	}
+	return NULL;
+}
+
+static void
+pt_insert(uint64_t phys, uint64_t * va)
+{
+	uint32_t hash = ((phys >> 12) * 2654435761u) & (PT_MAP_CAP - 1);
+	while (pt_map_table[hash].va != NULL) {
+		if (pt_map_table[hash].phys == phys) {
+			pt_map_table[hash].va = va;
+			return;
+		}
+		hash = (hash + 1) & (PT_MAP_CAP - 1);
+	}
+	pt_map_table[hash].phys = phys;
+	pt_map_table[hash].va = va;
+}
 
 static uint64_t *
 pt_page(uint64_t * phys)
@@ -237,9 +269,7 @@ pt_page(uint64_t * phys)
 }
 
 /*
- * The table below `entry` at `level`, made if there is none yet. The count of the table's
- * valid entries goes in bits 55:58 of the first three words of the table above it, which is
- * how the driver says how much of it there is.
+ * The table below `entry` at `level`, made if there is none yet.
  */
 static uint64_t *
 pt_below(int level, uint32_t index, uint64_t * entry)
@@ -247,17 +277,21 @@ pt_below(int level, uint32_t index, uint64_t * entry)
 	uint64_t phys;
 	uint64_t * table;
 
+	(void)level;
+	(void)index;
 	if (*entry & GPU_ENTRY_TYPE_MASK) {
-		return (uint64_t *)phystokv(*entry & 0x0000fffffffff000ull);
+		phys = *entry & 0x0000fffffffff000ull;
+		table = pt_lookup(phys);
+		if (table != NULL) {
+			return table;
+		}
 	}
 	table = pt_page(&phys);
 	if (table == NULL) {
 		return NULL;
 	}
+	pt_insert(phys, table);
 	*entry = phys | GPU_ENTRY_TABLE | GPU_ENTRY_AF;
-	pt_levels[level][index] = table;
-	pt_level_phys[level][index] = phys;
-	pt_level_used[level][index] = 0;
 	FlushPoC_DcacheRegion((vm_offset_t)entry, sizeof(*entry));
 	return table;
 }
@@ -266,11 +300,8 @@ pt_below(int level, uint32_t index, uint64_t * entry)
 static void
 pt_set_count(uint64_t * table, uint32_t count)
 {
-	volatile uint64_t * words = (volatile uint64_t *)table;
-
-	words[0] = (words[0] & ~GPU_ENTRY_COUNT) | (count ? GPU_ENTRY_COUNT : 0);
-	words[1] = (words[1] & ~GPU_ENTRY_COUNT) | (count ? GPU_ENTRY_COUNT : 0);
-	words[2] = (words[2] & ~GPU_ENTRY_COUNT) | (count ? GPU_ENTRY_COUNT : 0);
+	(void)table;
+	(void)count;
 }
 
 /* One 4 KB page of physical memory at GPU address `gpu`. */
@@ -298,9 +329,8 @@ map_page(uint64_t gpu, uint64_t phys)
 	if (l3 == NULL) {
 		return false;
 	}
-	l3[i3] = (phys & ~0xfffull) | GPU_ENTRY_LEAF | GPU_ENTRY_AF | GPU_ENTRY_NX;
+	l3[i3] = (phys & ~0xfffull) | GPU_ENTRY_LEAF | GPU_ENTRY_AF | (1ull << 6) | (2ull << 8);
 	FlushPoC_DcacheRegion((vm_offset_t)&l3[i3], sizeof(l3[i3]));
-	pt_level_used[2][i2] = 1;
 	return true;
 }
 
@@ -324,8 +354,23 @@ as_update(uint64_t top_phys)
 	wr(as + AS_MEMATTR_LO, 0x888d8f88u);
 	wr(as + AS_MEMATTR_HI, 0x00004c8du);
 	wr(as + AS_COMMAND, AS_COMMAND_UPDATE);
-	if (mali_wait(as + AS_STATUS, AS_STATUS_AS_ACTIVE, 0, 100)) {
-		wr(as + AS_COMMAND, AS_COMMAND_FLUSH_PT);
+	if (!mali_wait(as + AS_STATUS, AS_STATUS_AS_ACTIVE, 0, 100)) {
+		printf("mali: AS_COMMAND_UPDATE timeout\n");
+		return;
+	}
+
+	wr(as + AS_LOCKADDR_LO, 47u);
+	wr(as + AS_LOCKADDR_HI, 0);
+	wr(as + AS_COMMAND, AS_COMMAND_LOCK);
+	if (!mali_wait(as + AS_STATUS, AS_STATUS_AS_ACTIVE, 0, 100)) {
+		printf("mali: AS_COMMAND_LOCK timeout\n");
+		return;
+	}
+
+	wr(as + AS_COMMAND, AS_COMMAND_FLUSH_PT);
+	if (!mali_wait(as + AS_STATUS, AS_STATUS_AS_ACTIVE, 0, 100)) {
+		printf("mali: AS_COMMAND_FLUSH_PT timeout\n");
+		return;
 	}
 }
 
@@ -333,16 +378,6 @@ as_update(uint64_t top_phys)
 static void
 pt_counts(void)
 {
-	for (int level = 0; level < 3; level++) {
-		for (uint32_t i = 0; i < GPU_TABLE_ENTRIES; i++) {
-			uint64_t * table = pt_levels[level][i];
-
-			if (table != NULL) {
-				pt_set_count(table, pt_level_used[level][i] ? 1 : 0);
-				FlushPoC_DcacheRegion((vm_offset_t)table, PAGE_SIZE);
-			}
-		}
-	}
 }
 
 /* ---- the GPU addresses ---- */
@@ -350,16 +385,19 @@ pt_counts(void)
 static uint64_t next_address = GPU_ADDRESS_FIRST;
 
 uint64_t
-hakios_mali_address(uint64_t size)
+hakios_mali_address(uint64_t size, uint64_t alignment)
 {
 	uint64_t address;
 
+	if (alignment == 0) {
+		alignment = 0x10000;
+	}
 	lck_mtx_lock(&mali_lock);
-	address = next_address;
+	address = (next_address + alignment - 1) & ~(alignment - 1);
 	if (address + size > GPU_ADDRESS_END) {
 		address = 0;
 	} else {
-		next_address += (size + 0xffff) & ~0xffffull;
+		next_address = address + ((size + 0xffff) & ~0xffffull);
 	}
 	lck_mtx_unlock(&mali_lock);
 	return address;
@@ -373,8 +411,6 @@ hakios_mali_map(uint64_t gpu, uint64_t phys)
 
 	lck_mtx_lock(&mali_lock);
 	ok = map_page(gpu, phys);
-	pt_counts();
-	as_update(pt_top_phys);
 	lck_mtx_unlock(&mali_lock);
 	return ok;
 }
@@ -412,6 +448,13 @@ hakios_mali_ready(void)
 bool
 hakios_mali_parameter(uint32_t which, uint64_t * value)
 {
+	static const uint16_t simple[] = {
+		[5] = 0xe00,    /* STACK_PRESENT */
+		[6] = 0x018, [7] = 0x01c, [8] = 0x004, [9] = 0x008, [10] = 0x00c, [11] = 0x010, [12] = 0x014,
+		[13] = 0x0ac, [14] = 0x0a0, [15] = 0x0a4, [16] = 0x0a8, [17] = 0x300,
+		[18] = 0x0b0, [19] = 0x0b4, [20] = 0x0b8, [21] = 0x0bc,
+	};
+
 	if (!hakios_mali_ready()) {
 		return false;
 	}
@@ -420,53 +463,12 @@ hakios_mali_parameter(uint32_t which, uint64_t * value)
 		*value = (gpu_id >> 16) & 0xffff;
 		return true;
 	case 1:                                       /* GPU_REVISION */
-		*value = (gpu_id >> 4) & 0xffff;
+		*value = gpu_id & 0xffff;
 		return true;
 	case 2:                                       /* SHADER_PRESENT */
 	case 3:                                       /* TILER_PRESENT */
 	case 4:                                       /* L2_PRESENT */
 		*value = rd(mali + 0x100 + (which - 2) * 0x10) | ((uint64_t)rd(mali + 0x104 + (which - 2) * 0x10) << 32);
-		return true;
-	case 5:                                       /* STACK_PRESENT: none on this GPU */
-		*value = 0;
-		return true;
-	case 6:                                       /* SHADER_READY */
-	case 7:                                       /* TILER_READY */
-	case 8:                                       /* L2_READY */
-	case 9:                                       /* SHADER_PWRACTIVE */
-	case 10:                                      /* TILER_PWRACTIVE */
-	case 11:                                      /* L2_PWRACTIVE */
-	case 12:                                      /* SHADER_PWRTRANS */
-	case 13:                                      /* TILER_PWRTRANS */
-	case 14:                                      /* L2_PWRTRANS */
-	case 15:                                      /* SHADER_PWRON */
-	case 16:                                      /* TILER_PWRON */
-	case 17:                                      /* L2_PWRON */
-		*value = rd(mali + 0x100 + (which - 6) * 0x10);
-		return true;
-	case 18:                                      /* SHADER_PWROFF */
-	case 19:                                      /* TILER_PWROFF */
-	case 20:                                      /* L2_PWROFF */
-	case 21:                                      /* STACK_PRESENT_LO */
-		*value = rd(mali + 0x1c0 + (which - 18) * 4);
-		return true;
-	case 22:                                      /* SHADER_FEATURES */
-	case 23:                                      /* TILER_FEATURES */
-	case 24:                                      /* L2_FEATURES */
-	case 25:                                      /* MEM_FEATURES */
-	case 26:                                      /* MMU_FEATURES */
-	case 27:                                      /* REGISTER_FEATURES */
-	case 28:                                      /* SHADER_ID */
-	case 29:                                      /* L2_ID */
-	case 30:                                      /* TILER_ID */
-	case 31:                                      /* JASPER_ID */
-	case 32:                                      /* SCISSOR_ID */
-	case 33:                                      /* BRA_ID */
-	case 34:                                      /* DMA_ID */
-	case 35:                                      /* TILER_ID2 */
-	case 36:                                      /* NODE_ID */
-	case 37:                                      /* THREAD_COUNT */
-		*value = rd(mali + 0x0c0 + (which - 22) * 4);
 		return true;
 	case 38:                                      /* NR_CORE_GROUPS */
 		*value = 1;
@@ -481,6 +483,14 @@ hakios_mali_parameter(uint32_t which, uint64_t * value)
 		*value = 0;
 		return true;
 	default:
+		if (which >= 22 && which <= 37) {      /* JS_FEATURES0..15 */
+			*value = rd(mali + 0x0c0 + (which - 22) * 4);
+			return true;
+		}
+		if (which < sizeof(simple) / sizeof(simple[0]) && simple[which] != 0) {
+			*value = rd(mali + simple[which]);
+			return true;
+		}
 		return false;
 	}
 }
@@ -506,10 +516,16 @@ hakios_mali_submit(uint64_t chain, bool fragment)
 	wr(js + JS_HEAD_NEXT_HI, (uint32_t)(chain >> 32));
 	wr(js + JS_AFFINITY_NEXT_LO, shader_mask);
 	wr(js + JS_AFFINITY_NEXT_HI, 0);
-	wr(js + JS_CONFIG_NEXT, JS_CONFIG_DISABLE_DESCRIPTOR_WR_BK | GPU_AS_NUMBER);
+	wr(js + JS_CONFIG_NEXT,
+	    JS_CONFIG_START_FLUSH_CLEAN_INVALIDATE |
+	    JS_CONFIG_END_FLUSH_CLEAN_INVALIDATE |
+	    JS_CONFIG_START_MMU |
+	    JS_CONFIG_THREAD_PRI(8) |
+	    GPU_AS_NUMBER);
 	while (rd(js + JS_COMMAND_NEXT) != 0) {
 		/* the slot is busy with an older job */
 	}
+	asm volatile("dsb sy\n" ::: "memory");
 	wr(js + JS_COMMAND_NEXT, JS_COMMAND_START);
 	lck_mtx_unlock(&mali_lock);
 
@@ -517,16 +533,57 @@ hakios_mali_submit(uint64_t chain, bool fragment)
 	    JOB_IRQ_DONE(slot), 1000);
 	lck_mtx_lock(&mali_lock);
 	raw = rd(mali + JOB_IRQ_RAWSTAT);
-	if (!finished) {
-		status = (raw & JOB_IRQ_FAILED(slot)) ? rd(js + JS_STATUS) : 0xff;
-		printf("mali: a job on slot %u did not finish: interrupts %#x, status %#x, MMU %#x fault %#x at %#x\n",
-		    slot, raw, rd(js + JS_STATUS), rd(mali + MMU_IRQ_RAWSTAT),
-		    rd(mali + AS_BASE(GPU_AS_NUMBER) + AS_FAULTSTATUS),
-		    rd(mali + AS_BASE(GPU_AS_NUMBER) + AS_FAULTADDRESS_LO));
+	if (!finished || (raw & JOB_IRQ_FAILED(slot))) {
+		uint32_t as_base = AS_BASE(GPU_AS_NUMBER);
+		uint32_t fault_stat = rd(mali + as_base + AS_FAULTSTATUS);
+		uint64_t fault_addr = ((uint64_t)rd(mali + as_base + AS_FAULTADDRESS_HI) << 32) |
+		                      rd(mali + as_base + AS_FAULTADDRESS_LO);
+		uint32_t js_stat = rd(js + JS_STATUS);
+		uint32_t mmu_stat = rd(mali + MMU_IRQ_RAWSTAT);
+
+		status = (!finished && !(raw & JOB_IRQ_FAILED(slot))) ? 0xff : js_stat;
 		gMaliFailed++;
-	} else if (raw & JOB_IRQ_FAILED(slot)) {
-		status = rd(js + JS_STATUS);
-		gMaliFailed++;
+
+		printf("mali: job failure slot %u: int %#x, status %#x, MMU %#x, fault %#x at %#llx\n",
+		    slot, raw, js_stat, mmu_stat, fault_stat, fault_addr);
+		{
+			uint32_t head_lo = rd(js + JS_HEAD_LO), head_hi = rd(js + JS_HEAD_HI);
+			uint32_t tail_lo = rd(js + JS_TAIL_LO), tail_hi = rd(js + JS_TAIL_HI);
+			uint32_t js_cfg = rd(js + JS_CONFIG);
+			uint32_t js_cmd = rd(js + JS_COMMAND);
+			printf("mali:   slot %u regs: head=%#x:%#x tail=%#x:%#x cfg=%#x cmd=%#x\n",
+			    slot, head_hi, head_lo, tail_hi, tail_lo, js_cfg, js_cmd);
+		}
+
+		if (fault_addr != 0) {
+			uint32_t f0 = (fault_addr >> 39) & (GPU_TABLE_ENTRIES - 1);
+			uint32_t f1 = (fault_addr >> 30) & (GPU_TABLE_ENTRIES - 1);
+			uint32_t f2 = (fault_addr >> 21) & (GPU_TABLE_ENTRIES - 1);
+			uint32_t f3 = (fault_addr >> 12) & (GPU_TABLE_ENTRIES - 1);
+			uint64_t e0 = pt_top ? pt_top[f0] : 0;
+			uint64_t * l1 = (e0 & GPU_ENTRY_TYPE_MASK) ? pt_lookup(e0 & 0x0000fffffffff000ull) : NULL;
+			uint64_t e1 = l1 ? l1[f1] : 0;
+			uint64_t * l2 = (e1 & GPU_ENTRY_TYPE_MASK) ? pt_lookup(e1 & 0x0000fffffffff000ull) : NULL;
+			uint64_t e2 = l2 ? l2[f2] : 0;
+			uint64_t * l3 = (e2 & GPU_ENTRY_TYPE_MASK) ? pt_lookup(e2 & 0x0000fffffffff000ull) : NULL;
+			uint64_t e3 = l3 ? l3[f3] : 0;
+
+			printf("mali:   walk: L0[%u]=%#llx L1[%u]=%#llx L2[%u]=%#llx L3[%u]=%#llx (l3=%p)\n",
+			    f0, e0, f1, e1, f2, e2, f3, e3, l3);
+
+			for (uint32_t i = 0; i < gMaliBuffers && i < 32; i++) {
+				printf("mali:   bo[%u] %#llx..%#llx (size %llu, asked %u, flags %#x)%s\n",
+				    i + 1, gMaliMade[i].address, gMaliMade[i].address + gMaliMade[i].size,
+				    gMaliMade[i].size, gMaliMade[i].asked, gMaliMade[i].flags,
+				    (fault_addr >= gMaliMade[i].address && fault_addr < gMaliMade[i].address + gMaliMade[i].size) ? " <- FAULT IN BO" : "");
+			}
+		}
+
+		if (mmu_stat) {
+			wr(mali + as_base + AS_COMMAND, AS_COMMAND_UNLOCK);
+			wr(mali + as_base + AS_COMMAND, AS_COMMAND_FLUSH_PT);
+			wr(mali + MMU_IRQ_CLEAR, mmu_stat);
+		}
 	}
 	wr(mali + JOB_IRQ_CLEAR, raw);
 	lck_mtx_unlock(&mali_lock);
@@ -701,6 +758,9 @@ hakios_mali_init(void)
 	 */
 	if (pt_top == NULL) {
 		pt_top = pt_page(&pt_top_phys);
+		if (pt_top != NULL) {
+			pt_insert(pt_top_phys, pt_top);
+		}
 	}
 	if (pt_top == NULL) {
 		printf("mali: no memory for the GPU's page tables\n");

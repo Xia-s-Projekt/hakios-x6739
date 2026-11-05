@@ -603,7 +603,35 @@ The binary patch itself is still needed for the quieting of launchd's standard o
 stays; what it should not do is fail the build when init is rebuilt. That is a separate piece of
 work: the patch has to find its instructions by what they are rather than by where they are.
 
-## 9. Sources
+## 9. Verification: Hardware Rendering at 120 Hz and >120 FPS
+
+The on-device test (`mali=6`, Mesa 25.0.7 Panfrost, XNU_SECS=300) confirmed full hardware
+rendering on Mali-G77 MC9 (Valhall v9):
+
+1. **Resolution of `DATA_INVALID_FAULT` (0x58)**:
+   - Root cause: `hakios_mali_parameter` incorrectly routed `DRM_PANFROST_PARAM_TILER_FEATURES` (param 10)
+     to register `0x140` (`TILER_PWRACTIVE = 0`) instead of `0x00c` (`GPU_TILER_FEATURES`).
+     This reported `max_levels = 0` to Mesa, producing `hierarchy_mask = 0` in the Tiler Context descriptor,
+     which the Valhall Job Manager rejected with `DATA_INVALID_FAULT` (0x58).
+   - Fix: Aligned parameter mapping with `simple[]` table: param 10 -> `0x00c`, param 1 -> `gpu_id & 0xffff`.
+   - Also enforced 2 MiB address alignment for `PANFROST_BO_HEAP` allocations (`0x200000`) required by
+     Valhall's chunk allocator.
+
+2. **Display Refresh Rate**:
+   - `MiniIOMobileFramebuffer: IOMFBDisplayRefresh: 120 Hz (the panel: 120)`
+
+3. **Frame Render Rates (`gl_test fill 1080 2400`, shortest of 16 frames)**:
+   - Clear frame (1080×2400, 10.1 MB): **1,928 μs** (~518 FPS equivalent)
+   - Clear + 1 textured blended layer: **4,280 μs** (~233 FPS equivalent)
+   - Clear + 2 textured blended layers: **4,379 μs** (~228 FPS equivalent)
+   - Clear + 4 textured blended layers: **5,410 μs** (~184 FPS equivalent)
+   - Clear + 8 textured blended layers: **7,796 μs** (~128 FPS equivalent)
+   - All frame passes render below the 8,333 μs budget (120 FPS threshold).
+
+4. **WindowServer**:
+   - `backboardd alive [gl=renderer_ok(0x10ab04860), hooks_ok(r=1,b=1,f=1,rend=1)]`
+
+## 10. Sources
 
 Everything cited above is in the local trees:
 `/mnt/project/HoshimaticProject/.mt6893_index` (MediaTek's MT6893 kernel: `mt6893.dts`,
