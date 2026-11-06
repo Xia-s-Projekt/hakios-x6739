@@ -1512,7 +1512,11 @@ static void save_log(const struct span *sp, int nsp)
 				"usertrap:", "ustacks:", "inject_report:", "hakios: backboardd",
 				"hakios: finish_update", "hakios: render_update", "rwtouch:", "fps_info:", "gl_test:",
 				"hakios: unlock", "hakios: the server", "hakios: window server", "mali: the GPU is up",
-				"hakios: SpringBoard", "hakios: ignore_update_p", "hakios: display links"
+				"hakios: SpringBoard", "hakios: ignore_update_p", "hakios: display links",
+				/* (whether CoreAnimation was told to render every frame, and how often it is asked:
+				 * the boot-arguments are read when the library is loaded, and whether that read
+				 * worked decides the whole frame rate -- so it is kept) */
+				"hakios: ca_force=1", "hakios: pace:", "hakios: boot-arguments", "hakios: caenv:"
 			};
 			for (unsigned t = 0; t < sizeof(tags) / sizeof(tags[0]); t++) {
 				uint32_t n = (uint32_t)strlen(tags[t]);
