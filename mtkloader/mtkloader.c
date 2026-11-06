@@ -1516,7 +1516,15 @@ static void save_log(const struct span *sp, int nsp)
 				/* (whether CoreAnimation was told to render every frame, and how often it is asked:
 				 * the boot-arguments are read when the library is loaded, and whether that read
 				 * worked decides the whole frame rate -- so it is kept) */
-				"hakios: ca_force=1", "hakios: pace:", "hakios: boot-arguments", "hakios: caenv:"
+				"hakios: ca_force=1", "hakios: pace:", "hakios: boot-arguments", "hakios: caenv:",
+				/* (what the window server believes about the screen: asked once, early, and the
+				 * console's window of the run is later) */
+				"hakios: the window server's display", "hakios:   refreshRate",
+				"hakios:   minimumFrameDuration", "hakios:   maximumFramesPerSecond",
+				"hakios:   heartbeatRate", "hakios:   frameRateLimit", "hakios:   mode ",
+				/* (the display driver's own trace of the swaps: normally it goes to the loader's
+				 * log, which is not in the console's log) */
+				"tl: s ", "tl: v ", "tl: w ", "tl: y "
 			};
 			for (unsigned t = 0; t < sizeof(tags) / sizeof(tags[0]); t++) {
 				uint32_t n = (uint32_t)strlen(tags[t]);

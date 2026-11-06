@@ -659,12 +659,61 @@ server, the one that draws, believes.
 
 ### 9.4 Next steps
 
-1. Read the `ca_probe` run: what `refreshRate`, `minimumFrameDuration` and `maximumFramesPerSecond`
-   does the window server believe?
-2. Implement selector 27 (`IOMobileFramebufferGetFrameworkInfo`, 3084 bytes) with the display's
-   real information. The layout has to come from the Darwin userland side.
-3. The device tree's `display-scale` is the only display property the tree carries; the 120 Hz one
-   (`DeviceSupports120HzRefreshRate`, `DeviceSupportsProMotion`) is answered by MobileGestalt and
-   comes out as "(none)".
-4. The 156 ms full repaint of §8.5 is now 26.5 ms and every 0.17 s rather than every 6.2 s, so
+1. **The 300-second test window for the user is `tools/test-120hz.sh`** (the short one for
+   iteration is `tools/iter.sh`, 120 s). With the settings of §9.2 it gives 34.4 FPS; the goal is
+   120.
+2. **Re-read the `ca_probe` run** (`tools/iter.sh ca_probe=1`): what `refreshRate`,
+   `minimumFrameDuration` and `maximumFramesPerSecond` does the window server believe? The probe
+   is fixed now (§9.5); before the fix it crashed the window server.
+3. **`CA_HEARTBEAT_RATE`** (found in the shared cache, next to `CA_MAIN_DISPLAY_ORIENTATION` and
+   `windowserver-apple-display.cpp` in QuartzCore's display-setup code) looks like the switch that
+   sets the frame clock's rate directly. It has not been tried.
+4. **`IOMobileFramebufferGetFrameworkInfo`** (selector 27, 3084 bytes out) and **selector 17**
+   (3084 bytes in) are not implemented; CoreAnimation asks for the display's information at every
+   start and gets nothing, and hands the zeros back. Its own error string is
+   `CoreAnimation: GetDisplayInfo returned 0x%x`. The structure's layout has to come from the
+   Darwin userland side; guessing at a 3084-byte binary structure is what froze the system in
+   §9.5, so it must not be guessed at.
+5. **MobileGestalt** answers `(none)` for `DeviceSupports120HzRefreshRate` and
+   `DeviceSupportsProMotion`. Its answers come from a plist in
+   `/private/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/
+   Caches/com.apple.MobileGestalt.plist`, which does not exist here and is built at boot.
+6. The 156 ms full repaint of §8.5 is now 26.5 ms and every 0.17 s rather than every 6.2 s, so
    it is no longer the limit. The memory window (512 MB, 2 MB free) is still worth more.
+
+
+### 9.5 Two changes that broke the boot, and what they were
+
+Both were made in this session and both are reverted or fixed. They are written down because the
+symptom was the same and the cause was not.
+
+**`SwapWait` blocking (reverted, commit `60156f2`).** The theory was that CoreAnimation's frame
+clock follows the display's pace, so `SwapWait` (selector 6) should block until the swap is on the
+panel, as on a real display. It froze the window server: the swap CoreAnimation asks for is not the
+one this driver counts -- its number comes from `SwapBegin`'s counter, the one in the swap structure
+is a different number -- so the wait never ended. The system stopped at "Jumping to XNU..." and the
+log was **0 bytes**. It is not needed: the frame rate comes from CoreAnimation's own clock.
+
+**The `ca_probe` instrument (fixed, commit `9c4062a`).** It asks CADisplay about the screen from a
+thread of the window server's own. It crashed the window server the same way, every ten seconds:
+
+```
+userabort: backboardd[175] aborts, shared cache slide 0x4475c000; called from:
+  libsystem_c <- libc++abi <- libobjc <- CoreFoundation
+```
+
+Two faults in it, both mine: the thread had **no autorelease pool** (the display and its modes are
+autoreleased objects, and a thread without a pool lets them go under it -- asking a freed object a
+question is what crashed it), and every property was called with the same signature, a double,
+though some answer a boolean and some an object.
+
+**How to tell them apart, for next time.** The symptom is the same, but the log is not:
+
+| | log size | "tl: g" lines | useraborts |
+|---|---|---|---|
+| `xnu-ca120.log` (good) | 256 KB | 1125 | 0 |
+| `xnu-probe2.log` (the wait) | 256 KB | **0** | 20 |
+| `xnu-probe3.log` (the wait) | **0 bytes** | 0 | -- |
+| `xnu-revert.log` (the probe) | 256 KB | **0** | 18 |
+
+`tools/repaint.py` on a log with no "tl: g" line says "no tl: g lines"; that is the first sign.
