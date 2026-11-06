@@ -565,3 +565,106 @@ cheaper — more memory, fewer surfaces, less to redraw — moves the frame rate
 
 
 
+
+---
+
+## 9. Session 4 (2026-11-06): the frame clock was CoreAnimation's, and it was at 10 Hz
+
+§8 ended with the drawing thread asleep in `CFRunLoopRun` between frames, and a 156 ms full
+repaint every 6.2 s. This session found what asks for the frames.
+
+### 9.1 The instrument
+
+`ca_pace=1` (in `inject.c`): every call of `ignore_update_p` -- the call that decides whether an
+update is drawn or skipped -- is said with the time since the last one. The boot-arguments are
+read **on the first call and not when the library is loaded**: the library's constructor runs
+before the kernel's command line can be read from a program, so a read there finds nothing.
+
+What it says (`logs/xnu-pace2.log`):
+
+```
+call   60  +   365.2 ms        call  140  +    81.9 ms
+call   70  +   115.4 ms        call  150  +    99.9 ms
+call   80  +   150.0 ms        call  160  +   103.7 ms
+call   90  +   116.7 ms        call  170  +    97.2 ms
+call  100  +    50.7 ms        call  180  +   118.1 ms
+```
+
+**The window server was asking for a frame every 100 ms** -- ten a second -- while the display's
+own refresh notifications were arriving 120 a second the whole time (602-890 told per five
+seconds, 17-32 dropped).
+
+### 9.2 What it was: CoreAnimation's own clock, and the switch that fixes it
+
+CoreAnimation reads a set of switches from the window server's environment. The tree's
+`caenv=NAME=VALUE` puts them there. With
+
+```
+caenv=CA_FORCE_120HZ=1
+caenv=CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0
+caenv=CADisableMinimumFrameDurationOnPhone=1
+```
+
+the same run gives (`logs/xnu-ca120.log`, read with `tools/repaint.py`):
+
+| | without | with |
+|---|---|---|
+| frames | 335 over 97.8 s | **1125 over 32.8 s** |
+| frame rate | **3.4 FPS** | **34.4 FPS** |
+| gap between frames (median) | 96.9 ms | **13.7 ms** |
+| the frame's own drawing time | 3.9 ms | 2.9 ms |
+| the window server's heartbeat | 4.8 FPS | **37.4 FPS** |
+| the driver's own five-second report | 4 a second | **53 a second** |
+
+`gpu_fails=0`, `submit_us=240`: the GPU was never the limit.
+
+Which switch does it (each run alone):
+
+| | frame rate | gap |
+|---|---|---|
+| none | 3.4 FPS | 96.9 ms |
+| `CA_FORCE_120HZ=1` | **23.5 FPS** | 13.6 ms |
+| `CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0` | 3.4 FPS | 96.7 ms |
+| all three | **34.4 FPS** | 13.7 ms |
+
+**`CA_FORCE_120HZ=1` is the one that matters**: it took CoreAnimation off its 10 Hz fallback and
+onto a real clock. The other two add a little.
+
+### 9.3 What is left: 60 Hz, not 120
+
+With the switches on, CoreAnimation asks for a frame every **16.66 ms** -- exactly 60 Hz -- and
+the frames come every 13.6 ms. The panel is 120 Hz and the driver says so
+(`IOMFBDisplayRefresh: 120 Hz`, and the refresh notifications arrive 120 a second), but
+CoreAnimation does not believe it. Two things are known to be missing:
+
+- **`IOMobileFramebufferGetFrameworkInfo`** (selector 27) is **not implemented**. CoreAnimation
+  asks for it at the start of every run and gets nothing:
+  `MiniIOMobileFramebuffer: selector 27 not implemented (scalars 0 in [...], 0 out; structure 0 in,
+  3084 out)`. That is the structure with the display's framework information.
+- **CoreAnimation's frame-rate control** has the error string `CAFrameIntervalRange.minimum = 0
+  should not be registered` (QuartzCore, in the shared cache), and `CAFrameRateClient: pid %i
+  register to server %u %u %u`. It registers a *frame interval range* with the window server; if
+  the minimum comes out as 0 it cannot register, and the rate falls back.
+
+What CoreAnimation asks the window server for, and what it should be given:
+
+```
+heartbeatRate  minimumFrameDuration  preferredFrameDuration  maximumFramesPerSecond
+frameRateLimit  isFrameRateLimited  currentMode  preferredMode  availableModes
+```
+
+`ca_probe=1` (in `inject.c`) asks CADisplay **inside the window server**, where CADisplay is
+populated -- in another program it answers "(none)" and that says nothing about what the window
+server, the one that draws, believes.
+
+### 9.4 Next steps
+
+1. Read the `ca_probe` run: what `refreshRate`, `minimumFrameDuration` and `maximumFramesPerSecond`
+   does the window server believe?
+2. Implement selector 27 (`IOMobileFramebufferGetFrameworkInfo`, 3084 bytes) with the display's
+   real information. The layout has to come from the Darwin userland side.
+3. The device tree's `display-scale` is the only display property the tree carries; the 120 Hz one
+   (`DeviceSupports120HzRefreshRate`, `DeviceSupportsProMotion`) is answered by MobileGestalt and
+   comes out as "(none)".
+4. The 156 ms full repaint of §8.5 is now 26.5 ms and every 0.17 s rather than every 6.2 s, so
+   it is no longer the limit. The memory window (512 MB, 2 MB free) is still worth more.
