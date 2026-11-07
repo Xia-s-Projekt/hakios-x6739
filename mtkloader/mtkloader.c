@@ -2382,8 +2382,8 @@ void watcher_main(void)
 		uint64_t pa = (uint64_t)i << 30;
 		if (i == 0) {
 			watcher_l1[i] = pa | (1u << 10) | (0u << 2) | 1;            /* MMIO: device */
-		} else if (i < 8) {
-			watcher_l1[i] = pa | (1u << 10) | (3u << 8) | (1u << 2) | 1; /* DRAM: normal WB, inner shareable */
+		} else if (i < 10) {
+			watcher_l1[i] = pa | (1u << 10) | (3u << 8) | (1u << 2) | 1; /* DRAM: normal WB, inner shareable (up to 0x280000000) */
 		} else {
 			watcher_l1[i] = 0;
 		}

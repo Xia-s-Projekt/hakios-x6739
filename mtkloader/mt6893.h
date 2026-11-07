@@ -33,14 +33,14 @@
 #define DRAM_SIZE           0x200000000ULL
 
 /*
- * XNU's window: one contiguous range, clear of the phone's own reservations.
+ * XNU's window: relocated to upper DRAM (above 4 GiB), completely clear of the
+ * modem's EMI-MPU regions (0xe0000000-0xebeaffff).
  *
  * From /reserved-memory in the phone's device tree and /proc/iomem:
- *   0xc0000000 - 0xdfffffff (512 MiB) is unreserved System RAM.
- *   0xe0000000 - 0xebeaffff holds mblock-25/26/27-md_mem_usage (modem EMI-MPU regions).
+ *   0x140000000 - 0x2358fffff (3929 MiB) is contiguous unreserved System RAM.
  */
-#define XNU_PHYS_BASE       0xC0000000ULL
-#define XNU_MEM_SIZE        0x20000000ULL       /* 512 MiB: 0xc0000000..0xdfffffff, clear of md_mem_usage at 0xe0000000 */
+#define XNU_PHYS_BASE       0x140000000ULL
+#define XNU_MEM_SIZE        0x80000000ULL       /* 2.0 GiB: 0x140000000..0x1bfffffff */
 
 /* Where the system image is put, clear of the kernel, as xnuloader does it (RESIDENT_RD_OFFSET). */
 #define SYSTEM_PA           (XNU_PHYS_BASE + 0x08000000ULL)

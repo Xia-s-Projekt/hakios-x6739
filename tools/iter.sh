@@ -16,7 +16,11 @@ SECS=${XNU_SECS:-120}
 LOG=${XNU_LOG_OUT:-$ROOT/logs/xnu-iter.log}
 BASE="cpus=4 touchscreen=1 mali=6 mali_clk=2 ca_force=1 ca_vbl=1 fb_hz=120 fb_ca_hz=120 \
 fbscale=2 fbfit=3 fb_queue=1 fb_flip=1 touch_lat=1 caenv=CA_FORCE_120HZ=1 \
-caenv=CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0"
+caenv=CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0 \
+caenv=CA_HEARTBEAT_RATE=120 \
+caenv=CA_MINIMUM_FRAME_DURATION=0p0083333 \
+caenv=CADisableMinimumFrameDurationOnPhone=1 \
+caenv=CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0"
 ARGS="$BASE $*"
 
 echo "iter.sh: ${SECS} s, the log is $LOG"

@@ -28,7 +28,11 @@ SECS=${XNU_SECS:-300}
 LOG=${XNU_LOG_OUT:-$ROOT/logs/xnu-120hz.log}
 ARGS=${XNU_ARGS:-"cpus=4 touchscreen=1 mali=6 mali_clk=2 ca_force=1 ca_vbl=1 fb_hz=120 fb_ca_hz=120 \
 fbscale=2 fbfit=3 fb_queue=1 fb_flip=1 touch_lat=1 caenv=CA_FORCE_120HZ=1 \
-caenv=CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0"}
+caenv=CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0 \
+caenv=CA_HEARTBEAT_RATE=120 \
+caenv=CA_MINIMUM_FRAME_DURATION=0p0083333 \
+caenv=CADisableMinimumFrameDurationOnPhone=1 \
+caenv=CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0"}
 
 echo "test-120hz.sh: a ${SECS} s run; the log is $LOG"
 HAKIOS_SERIAL=${HAKIOS_SERIAL:?set HAKIOS_SERIAL to the serial of your phone, as adb devices shows it} \
