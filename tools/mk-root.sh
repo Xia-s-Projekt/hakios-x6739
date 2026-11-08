@@ -116,6 +116,10 @@ plistlib.dump({
 }, open(p, 'wb'))
 "
 printf 'f\t644\t501\t501\t/private/var/mobile/Library/Preferences/com.apple.weather.plist\t/var/mobile/Library/Preferences/com.apple.weather.plist\n' >> "$ROOT/build-root/etc/var.skel"
+if [ -f "$COMMON/userland/var/mobile/Library/Preferences/com.apple.UIKit.plist" ]; then
+	cp "$COMMON/userland/var/mobile/Library/Preferences/com.apple.UIKit.plist" "$ROOT/build-root/var/mobile/Library/Preferences/com.apple.UIKit.plist"
+	printf 'f\t644\t501\t501\t/private/var/mobile/Library/Preferences/com.apple.UIKit.plist\t/var/mobile/Library/Preferences/com.apple.UIKit.plist\n' >> "$ROOT/build-root/etc/var.skel"
+fi
 # Hook WeatherWidget with libhakios.app.dylib for diagnostic output on /dev/console
 if [ -f "$ROOT/build-root/etc/inject.conf" ]; then
 	sed -i -e 's|/redwood/lib/libhakios.app.dylib Sileo|/redwood/lib/libhakios.app.dylib Sileo WeatherWidget|' "$ROOT/build-root/etc/inject.conf"
