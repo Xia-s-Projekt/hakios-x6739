@@ -322,6 +322,13 @@ static uint64_t lk_dtb;
 static uint32_t runtime_cpus = 0;
 static uint32_t runtime_secs = 0;
 static char runtime_extra_args[256];
+/*
+ * The phone's own serial number, as Android reports it when the boot is asked for
+ * (tools/batt-request.sh writes it into the request). It goes into the device tree's
+ * "serial-number", and that is what the About page of the settings shows. Without it the
+ * page shows a placeholder.
+ */
+static char runtime_serial[32];
 static char runtime_cmdline[608];
 
 /* ---- small libc (device memory: plain loops, word copies when aligned) ---- */
@@ -1255,8 +1262,13 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 	dt_begin(&w, "device-tree");
 	dt_identity(&w, identity_root, sizeof(identity_root) / sizeof(identity_root[0]), identity_root_data);
 	dt_prop_str(&w, "platform-name", "t8015");
-	dt_prop_padded(&w, "serial-number", XNU_SERIAL, 32);
-	dt_prop_padded(&w, "mlb-serial-number", XNU_SERIAL "MLB", 32);
+	{
+		/* the phone's own serial number, when the request carried one */
+		const char *serial = runtime_serial[0] ? runtime_serial : XNU_SERIAL;
+
+		dt_prop_padded(&w, "serial-number", serial, 32);
+		dt_prop_padded(&w, "mlb-serial-number", XNU_SERIAL "MLB", 32);
+	}
 	dt_prop_padded(&w, "model-number", "MQAC2", 32);
 	dt_prop_padded(&w, "region-info", "LL/A", 32);
 	dt_prop_padded(&w, "regulatory-model-number", "A1865", 32);
@@ -4040,7 +4052,19 @@ static int pmsg_take(const char *flag, uint32_t n)
 							}
 						}
 						runtime_secs = val;
-					} else if (param_len >= 6 && d[cur] == 'e' && d[cur+1] == 'x' && d[cur+2] == 't' &&
+					} else if (param_len >= 7 && d[cur] == 's' && d[cur+1] == 'e' && d[cur+2] == 'r' &&
+				           d[cur+3] == 'i' && d[cur+4] == 'a' && d[cur+5] == 'l' && d[cur+6] == '=') {
+					/* the phone's own serial number, read under Android */
+					uint32_t slen = next - (cur + 7);
+
+					if (slen >= sizeof(runtime_serial)) {
+						slen = sizeof(runtime_serial) - 1;
+					}
+					for (uint32_t i = 0; i < slen; i++) {
+						runtime_serial[i] = d[cur + 7 + i];
+					}
+					runtime_serial[slen] = '\0';
+				} else if (param_len >= 6 && d[cur] == 'e' && d[cur+1] == 'x' && d[cur+2] == 't' &&
 					           d[cur+3] == 'r' && d[cur+4] == 'a' && d[cur+5] == '=') {
 						uint32_t elen = next - (cur + 6);
 						if (elen >= sizeof(runtime_extra_args)) {

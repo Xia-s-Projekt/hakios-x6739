@@ -69,7 +69,19 @@ TC=$(( ${TEMP:-0} / 10 ))
 # The voltage is in microvolts.
 MV_MV=$(( ${MV:-0} / 1000 ))
 
+# The phone's own serial number: the loader puts it into the device tree's "serial-number", and
+# that is what the About page of the settings shows. It is read here, under Android, because
+# only Android knows it: the loader runs with the MMU off and has no file system to read.
+# The serial of the phone's own device tree is not it (that one is a placeholder too), so the
+# property the system's own service answers with is the one that is used.
+SERIAL=$(adb -s "$S" shell 'getprop ro.serialno' 2>/dev/null | tr -d '\r\n')
+case "$SERIAL" in
+[0-9A-Za-z]*) ;;
+*) SERIAL="";;
+esac
+
 REQ="DARWIN-X6739:BOOT-XNU:batt=$BATT,$MV_MV,$CUR,$TC,$ST,${ONLINE:-0}"
+[ -n "$SERIAL" ] && REQ="$REQ:serial=$SERIAL"
 [ -n "$HAKIOS_REQUEST_EXTRA" ] && REQ="$REQ:$HAKIOS_REQUEST_EXTRA"
 echo "request: $REQ"
 adb -s "$S" shell "su -c \"printf '$REQ\n' > /dev/pmsg0\""
