@@ -1522,6 +1522,9 @@ static void save_log(const struct span *sp, int nsp)
 				"usertrap:", "ustacks:", "inject_report:", "hakios: backboardd",
 				"hakios: finish_update", "hakios: render_update", "rwtouch:", "fps_info:", "gl_test:",
 				"hakios: unlock", "hakios: the server", "hakios: window server", "mali: the GPU is up",
+				/* (the touch screen's own samples: where a touch lands and what the system makes
+				 * of it - without them the log says nothing about a touch that did nothing) */
+				"hakios: input", "hakios: layers", "hakios: setup and icon allow hooks",
 				"hakios: SpringBoard", "hakios: ignore_update_p", "hakios: display links",
 				/* (whether CoreAnimation was told to render every frame, and how often it is asked:
 				 * the boot-arguments are read when the library is loaded, and whether that read
