@@ -12,7 +12,7 @@ SECS=${XNU_SECS:-45}
 # XNU_ARGS: the kernel's own command line (cores and so on); the clock comes from this machine
 # touchscreen=1: the kernel's touch driver (kernel/bsd/dev/hakios.ft3681.c) starts only with it
 DEFAULT_ARGS="cpus=4 touchscreen=1 mali=6 mali_clk=2 ca_force=1 ca_vbl=1 fb_hz=120 fb_ca_hz=120 \
-fbscale=2 fbfit=3 fb_queue=1 fb_flip=1 touch_lat=1 caenv=CA_FORCE_120HZ=1 \
+fbscale=2 fbfit=3 fb_queue=1 fb_flip=1 touch_lat=0 caenv=CA_FORCE_120HZ=1 \
 caenv=CA_DISABLE_APT=1 \
 caenv=CA_ENABLE_ALL_FRAME_RATES=1 \
 caenv=CA_HEARTBEAT_RATE=120 \

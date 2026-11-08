@@ -153,13 +153,13 @@ if [ "${HAKIOS_QUIET_JOBS:-0}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d 
 	# phone's console drops lines when there is a lot of output on it, and the window server's
 	# own line about the screen is early in the run: with the whole job set going, it is gone
 	# before the log comes back.
-	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored chronod mediaremote weatherd" \
+	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond appstored chronod mediaremote weatherd" \
 		OSLOG="com.apple.backboardd" \
 		python3 mkjobs.py --rest ../sysimage/rootfs "$ROOT/build-root/LaunchDaemons" \
 		com.apple.notifyd com.apple.logd com.apple.containermanagerd com.apple.containermanagerd.system \
 		com.apple.runningboardd com.apple.backboardd com.apple.mobile.usermanagerd com.apple.lsd \
 		com.apple.iconservices.iconservicesagent com.apple.pluginkit.pkd com.apple.SpringBoard \
-		com.apple.nsurlsessiond com.apple.cloudd com.apple.syncdefaultsd com.apple.appstored \
+		com.apple.nsurlsessiond com.apple.cloudd com.apple.appstored \
 		com.apple.chronod com.apple.mediaremoted com.apple.distnoted.xpc.daemon \
 		com.apple.weatherd) >/dev/null 2>&1
 	python3 -c "
@@ -255,12 +255,6 @@ cat > "$ROOT/build-root/etc/rc.jobs" << 'EOF'
 /redwood/bin/mg_test main-screen-scale main-screen-width main-screen-height main-screen-class DeviceSupports120HzRefreshRate MaxRefreshRate main-screen-refresh-rate DeviceSupportsProMotion
 /redwood/bin/fps_info
 /bin/ps -A
-/redwood/bin/rwtouch wait 35 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
-/redwood/bin/rwtouch wait 50 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
-/redwood/bin/rwtouch wait 70 tap 0.5 0.5 wait 1 swipe 0.5 0.99 0.5 0.35 250 wait 1 notify com.hakios.unlock &
-/redwood/bin/rwtouch wait 140 tap 0.5 0.5 wait 1 swipe 0.8 0.5 0.2 0.5 250 &
-/redwood/bin/rwtouch wait 170 tap 0.5 0.5 wait 1 swipe 0.2 0.5 0.8 0.5 250 &
-/redwood/bin/rwtouch wait 200 tap 0.5 0.5 wait 1 swipe 0.5 0.3 0.5 0.8 250 &
 EOF
 if [ -n "${HAKIOS_RC_JOBS:-}" ]; then
 	cp "$COMMON/userland/$HAKIOS_RC_JOBS" "$ROOT/build-root/etc/rc.jobs"
