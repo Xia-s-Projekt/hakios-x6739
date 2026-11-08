@@ -83,6 +83,13 @@ if [ -x "$LDID_BIN" ]; then
 		[ -f "$bin" ] && "$LDID_BIN" -S "$bin" 2>/dev/null || true
 	done
 fi
+# Assets for SpringBoard: wallpaper image
+WP_SRC="$COMMON/sysimage/rootfs/System/Library/PrivateFrameworks/Settings/DisplayAndBrightnessSettings.framework/ContinuousExposeLayout-Dark-LTR.ca/assets/SydneyDarkWallpaper.jpg"
+if [ -f "$WP_SRC" ]; then
+	mkdir -p "$ROOT/build-root/share" "$ROOT/build-root/var/mobile/Library"
+	cp "$WP_SRC" "$ROOT/build-root/share/wallpaper.jpg"
+	cp "$WP_SRC" "$ROOT/build-root/var/mobile/Library/wallpaper.jpg"
+fi
 # The jobs the phone's launchd starts. The tree's own list (userland/root/LaunchDaemons) is what
 # the tree built; the wallpaper needs more of them: PosterBoard, which draws the wallpaper live in
 # its own process, never starts without the daemons it waits for. The tree's notes (docs/ru/notes.md)
@@ -112,14 +119,24 @@ if [ "${HAKIOS_QUIET_JOBS:-0}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d 
 	# phone's console drops lines when there is a lot of output on it, and the window server's
 	# own line about the screen is early in the run: with the whole job set going, it is gone
 	# before the log comes back.
-	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored chronod" \
+	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored chronod mediaremote" \
 		OSLOG="com.apple.backboardd" \
 		python3 mkjobs.py --rest ../sysimage/rootfs "$ROOT/build-root/LaunchDaemons" \
 		com.apple.notifyd com.apple.logd com.apple.containermanagerd com.apple.containermanagerd.system \
 		com.apple.runningboardd com.apple.backboardd com.apple.mobile.usermanagerd com.apple.lsd \
 		com.apple.iconservices.iconservicesagent com.apple.pluginkit.pkd com.apple.SpringBoard \
 		com.apple.nsurlsessiond com.apple.cloudd com.apple.syncdefaultsd com.apple.appstored \
-		com.apple.chronod) >/dev/null 2>&1
+		com.apple.chronod com.apple.mediaremoted com.apple.distnoted.xpc.daemon) >/dev/null 2>&1
+	python3 -c "
+import plistlib, os
+for label in ('com.apple.chronod', 'com.apple.mediaremoted'):
+    p = os.path.join('$ROOT/build-root/LaunchDaemons', f'{label}.plist')
+    if os.path.isfile(p):
+        d = plistlib.load(open(p, 'rb'))
+        d['RunAtLoad'] = True
+        d['KeepAlive'] = True
+        plistlib.dump(d, open(p, 'wb'))
+"
 fi
 # The patch of init's binary: launchd's standard output and standard error go to /dev/null when
 # /etc/quiet is there (otherwise launchd floods the console). The offsets are the addresses of
