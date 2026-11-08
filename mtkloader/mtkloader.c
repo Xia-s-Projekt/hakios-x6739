@@ -1490,7 +1490,13 @@ struct span {
 static void save_log(const struct span *sp, int nsp)
 {
 	uint64_t total = 0, room, head, tail, skip_to, at = 0;
+	/* the lines about the home screen's touch have a part of their own: the rest of the buffer
+	 * is filled up by the window server's frame counter in a minute of running, and these would
+	 * be the ones dropped. The loader's image has to fit in the 256 KB the chainboot gives it,
+	 * so the space is taken from the buffer that is there, not added. */
 	static char diagnostics[131072];
+	char *homescreen = diagnostics + 65536;
+	uint32_t homescreen_used = 0, homescreen_dropped = 0;
 	char line[1024];
 	uint32_t used = 0, length = 0, dropped = 0;
 	int oversized = 0;
@@ -1508,6 +1514,10 @@ static void save_log(const struct span *sp, int nsp)
 				continue;
 			}
 			int wanted = 0;
+			/* the lines about the home screen's touch have a buffer of their own: the one
+			 * below is filled up by the window server's frame counter in a minute of running,
+			 * and these would be the ones dropped */
+			int wanted_homescreen = 0;
 			const char *tags[] = {
 				"usertrap:", "ustacks:", "inject_report:", "hakios: backboardd",
 				"hakios: finish_update", "hakios: render_update", "rwtouch:", "fps_info:", "gl_test:",
@@ -1526,6 +1536,9 @@ static void save_log(const struct span *sp, int nsp)
 				 * log, which is not in the console's log) */
 				"tl: s ", "tl: v ", "tl: w ", "tl: y "
 			};
+			const char *homescreen_tags[] = {
+				"inject_report: [SpringBoard] homescreen: "
+			};
 			for (unsigned t = 0; t < sizeof(tags) / sizeof(tags[0]); t++) {
 				uint32_t n = (uint32_t)strlen(tags[t]);
 				for (uint32_t j = 0; j + n <= length; j++) {
@@ -1536,8 +1549,25 @@ static void save_log(const struct span *sp, int nsp)
 					wanted |= match == n;
 				}
 			}
-			if (wanted) {
-				if (!oversized && length <= sizeof(diagnostics) - used) {
+			for (unsigned t = 0; t < sizeof(homescreen_tags) / sizeof(homescreen_tags[0]); t++) {
+				uint32_t n = (uint32_t)strlen(homescreen_tags[t]);
+				for (uint32_t j = 0; j + n <= length; j++) {
+					uint32_t match = 0;
+					while (match < n && line[j + match] == homescreen_tags[t][match]) {
+						match++;
+					}
+					wanted_homescreen |= match == n;
+				}
+			}
+			if (wanted_homescreen) {
+				if (!oversized && length <= 65536 - homescreen_used) {
+					memcpy(homescreen + homescreen_used, line, length);
+					homescreen_used += length;
+				} else {
+					homescreen_dropped++;
+				}
+			} else if (wanted) {
+				if (!oversized && length <= 65536 - used) {
 					memcpy(diagnostics + used, line, length);
 					used += length;
 				} else {
@@ -1629,6 +1659,14 @@ static void save_log(const struct span *sp, int nsp)
 		dbg_puts(" ===\n");
 		for (uint32_t i = 0; i < used; i++) {
 			plog_putc(diagnostics[i]);
+		}
+	}
+	if (homescreen_used > 0) {
+		dbg_puts("\n=== the home screen's touch; dropped ");
+		dbg_dec(homescreen_dropped);
+		dbg_puts(" ===\n");
+		for (uint32_t i = 0; i < homescreen_used; i++) {
+			plog_putc(homescreen[i]);
 		}
 	}
 	fbc.base = fb;
