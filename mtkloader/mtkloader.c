@@ -1552,7 +1552,9 @@ static void save_log(const struct span *sp, int nsp)
 				"tl: s ", "tl: v ", "tl: w ", "tl: y "
 			};
 			const char *homescreen_tags[] = {
-				"inject_report: [SpringBoard] homescreen: "
+				/* the home screen's own lines, and the window server's about the touch screen */
+				"inject_report: [SpringBoard] homescreen: ",
+				"inject_report: [backboardd] homescreen: "
 			};
 			for (unsigned t = 0; t < sizeof(tags) / sizeof(tags[0]); t++) {
 				uint32_t n = (uint32_t)strlen(tags[t]);
