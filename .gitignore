@@ -13,6 +13,7 @@ mtkloader/gpufw.h
 # the runs' logs
 logs/
 *.log
+fbshot.png
 # the XNU payload and the system image
 *.packfs
 xnusys*
