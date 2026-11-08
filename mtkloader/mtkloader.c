@@ -485,6 +485,63 @@ static uint32_t marker_get(void)
 	return (a == b || a == c) ? a : (b == c ? b : 0);
 }
 
+
+/*
+ * The display interface's registers, for the tearing.
+ *
+ * The display driver writes the frame into the memory the panel scans, and the panel reads it
+ * while it is written: a frame written across the line being read comes out torn. The driver
+ * can avoid that by writing each thread's share of the rows behind the line being read, and
+ * it needs the line for that - the interface's own counter says where the scan is. The
+ * counter's place is not the same on every SoC, so the registers are read here, twice with a
+ * moment between them, and the ones that count are the ones that changed.
+ *
+ * DSI0 is at 0x1400e000 (the phone's own tree: /soc/dsi@1400e000, compatible "mediatek,mt6893-dsi"
+ * is "mediatek,mt6885-dsi"). The offsets are the ones MediaTek's own mt6885 driver uses
+ * (drivers/misc/mediatek/video/mt6885/dispsys/ddp_reg_dsi.h):
+ *   0x000 DSI_START   0x004 DSI_STA     0x014 DSI_MODE_CTRL  0x088 DSI_TRIG_STA
+ *   0x148..0x174 the state debug registers (DSI_STATE_DBG0..DBG10)
+ *   0x15c DSI_STATE_DBG5, whose low half is a timer counter
+ */
+#define DSI0_BASE          0x1400e000ULL
+#define DSI_REG(n)         (DSI0_BASE + (n))
+
+static void
+dsi_probe(void)
+{
+	static const uint32_t offsets[] = {
+		0x000, 0x004, 0x008, 0x00c, 0x010, 0x014, 0x018, 0x020, 0x024, 0x028, 0x02c, 0x030,
+		0x038, 0x03c, 0x088, 0x08c, 0x090, 0x094, 0x144, 0x148, 0x14c, 0x150, 0x154, 0x158,
+		0x15c, 0x160, 0x164, 0x168, 0x16c, 0x170, 0x174
+	};
+	uint32_t first[sizeof(offsets) / sizeof(offsets[0])];
+	uint32_t second[sizeof(offsets) / sizeof(offsets[0])];
+	unsigned n = sizeof(offsets) / sizeof(offsets[0]);
+
+	for (unsigned i = 0; i < n; i++) {
+		first[i] = rd32(DSI_REG(offsets[i]));
+	}
+	dbg_delay_ms(60);
+	for (unsigned i = 0; i < n; i++) {
+		second[i] = rd32(DSI_REG(offsets[i]));
+	}
+	out("dsi: the display interface's registers at ");
+	out_hex(DSI0_BASE);
+	out(":\n");
+	for (unsigned i = 0; i < n; i++) {
+		out("  +");
+		out_hex(offsets[i]);
+		out(" ");
+		out_hex(first[i]);
+		if (second[i] != first[i]) {
+			out(" -> ");
+			out_hex(second[i]);
+			out(" (it counts)");
+		}
+		out("\n");
+	}
+}
+
 /* ---- the display ---- */
 
 static uint64_t fb_base;
@@ -1266,6 +1323,9 @@ static uint32_t build_device_tree(uint64_t dt_pa, uint64_t rd_pa, uint64_t rd_si
 		/* the phone's own serial number, when the request carried one */
 		const char *serial = runtime_serial[0] ? runtime_serial : XNU_SERIAL;
 
+		out("display: the serial number given to iOS is ");
+		out(serial);
+		out("\n");
 		dt_prop_padded(&w, "serial-number", serial, 32);
 		dt_prop_padded(&w, "mlb-serial-number", XNU_SERIAL "MLB", 32);
 	}
@@ -1640,6 +1700,20 @@ static void save_log(const struct span *sp, int nsp)
 	}
 #endif
 
+	/*
+	 * The lines about the home screen's touch are written down first: the ramoops console
+	 * keeps 256 KB, and a run at 120 frames a second fills it with the window server's own
+	 * lines long before the end of the run. The lines that say what the touch did were at
+	 * the end of it, and there was no room left for them.
+	 */
+	if (homescreen_used > 0) {
+		dbg_puts("\n=== the home screen's touch; dropped ");
+		dbg_dec(homescreen_dropped);
+		dbg_puts(" ===\n");
+		for (uint32_t i = 0; i < homescreen_used; i++) {
+			plog_putc(homescreen[i]);
+		}
+	}
 	uint64_t fb = fbc.base;
 	fbc.base = 0; /* the screen gets the tail, separately */
 	for (int i = 0; i < nsp; i++) {
@@ -1676,14 +1750,6 @@ static void save_log(const struct span *sp, int nsp)
 		dbg_puts(" ===\n");
 		for (uint32_t i = 0; i < used; i++) {
 			plog_putc(diagnostics[i]);
-		}
-	}
-	if (homescreen_used > 0) {
-		dbg_puts("\n=== the home screen's touch; dropped ");
-		dbg_dec(homescreen_dropped);
-		dbg_puts(" ===\n");
-		for (uint32_t i = 0; i < homescreen_used; i++) {
-			plog_putc(homescreen[i]);
 		}
 	}
 	fbc.base = fb;
@@ -4646,6 +4712,7 @@ void mtkloader_main(uint64_t dtb)
 	out_hex(dtb);
 	out("\n");
 	display_report();
+	dsi_probe();
 	ufs_probe();
 	ufs_setup_shared();
 	mt6893_connsys_dt_report(dtb);  /* Wi-Fi step 1: the phone's tree on CONNSYS */
