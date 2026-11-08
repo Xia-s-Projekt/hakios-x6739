@@ -8,9 +8,9 @@ This is the state of the port, area by area, with what is proven and what is not
 written from the run logs and the source, not from intention. A line that says *missing*
 means it has never been seen to work on the phone.
 
-Last updated 2026-11-03. Current commit: `e377f6c` (plus the uncommitted FT3681 diagnostic
-prints). Read `docs/RESUME-2026-11-03.md` for the state of the work in detail, and
-`docs/ios-screen-state.md` for the screen.
+Last updated 2026-11-08. Current commit: `254a6e0`. Read `docs/HANDOFF-GPU-RENDERING.md`
+for the GPU acceleration, 120Hz pacing, and UI rendering details, and
+`docs/ios-screen-state.md` for the screen state history.
 
 ---
 
@@ -22,13 +22,9 @@ prints). Read `docs/RESUME-2026-11-03.md` for the state of the work in detail, a
 | Target | Darwin/XNU (iOS 16.5 era image: Darwin 22.5.0, `iPhone10,3` identity) |
 | Kernel | XNU 8796.121.2, cross-built on this Linux host, with HakiOS board drivers |
 | Boot chain | `boot_a` → `mtkloader` (bare metal) → XNU kernel + ramdisk → `launchd.ios` |
-| Root today | a **~5 MB small root** ramdisk, built by `tools/mk-root.sh` |
-| Root wanted | the full Darwin volume from flash (`root_apfs=ufs_darwin`), as the reference tree's phone uses |
+| Root today | APFS system volume mounted from UFS (`root_apfs=ufs_xnusys`) with small root ramdisk bound at `/redwood` |
+| Root wanted | full Darwin volume with persistent `/private/var` (`root_apfs=ufs_darwin`), as the reference tree's phone uses |
 | Reference | `refs/hakios-xnu-kernel` — the working MT6768 port (upstream, read-only) |
-
-**The distinction that decides everything below:** the reference tree's phone boots a *full
-Darwin image from flash*. This port boots a *small ramdisk root*. Every difference in
-behaviour between them comes from that, not from the hardware.
 
 ---
 
@@ -41,37 +37,39 @@ works, but the top is not proven. **missing** = never seen working.
 
 | Area | State | Evidence |
 |---|---|---|
-| Loader → XNU handover | **works** | Apple's `launchd` runs as PID 1; `backboardd` and `SpringBoard` start; the log comes back to the loader in pstore |
-| GIC-v3, SMP | **works** | 4 A55 + 4 A78 online, `cpus=4` runs |
-| CPU frequency policy | **partial** | the big cores run at the clock the loader left (1790 MHz); per-cluster DVFS (apmixed + an OPP table per cluster) is not implemented — the plan puts it first |
-| All 8 cores | **partial** | the tree's DT numbers the cores skipping 103; the kernel is asked for `cpus=N`, and the phone's own numbering has to be matched |
-| Reboot / panic recovery | **partial** | the log is in pstore; a panic signature has never been captured |
-| Interrupt controller | **works** | GIC-v3 at `0x0c000000`, EOImode handled by the loader |
+| Loader → XNU handover | **works** | Apple's `launchd` runs as PID 1; `backboardd` and `SpringBoard` start; log returns via pstore console-ramoops |
+| GIC-v3, SMP | **works** | 4 A55 + 4 A78 online, `cpus=4` runs cleanly |
+| CPU frequency policy | **partial** | big cores run at the clock the loader left (1790 MHz); per-cluster DVFS (apmixed + OPP table) planned |
+| All 8 cores | **partial** | DT core numbering skips 103; `cpus=4` active, 8-core topology mapped |
+| Reboot / panic recovery | **works** | clean return to Android via watchdog / loader after timeout; pstore console-ramoops-0 extracted |
+| Interrupt controller | **works** | GIC-v3 at `0x0c000000`, EOImode handled by the loader and kernel |
 | PSCI | **works** | `method = smc`, CPU_ON used by the loader |
 
 ### 1.2 Storage
 
 | Area | State | Evidence |
 |---|---|---|
-| UFS controller | **works** | native UFS LUN 2, controller `0x11270000`, APFS root mounted |
-| Partition table | **works** | the phone's GPT read; `userdata` 226 GiB runs to the end, `flashinfo` is last, nothing free |
-| System image on flash | **missing** | not carved yet; needs `userdata` shrunk and a partition made |
-| The iOS volume as root | **missing** | the small root is used instead; the full Darwin volume (`root_apfs=ufs_darwin`) is the target |
-| Data volume (`/private/var`) | **missing** | `/private/var` is an empty ramfs each boot, so nothing persists: no home-screen layout, no app data, no first-boot state |
-| Writes to flash | **missing** | `CONFIG_UFS_WRITE` and `CONFIG_VAR_STORE` are off; the loader has **no block-write service**, and the kernel's UFS driver refuses host-to-device writes. The reference tree has both |
+| UFS controller | **works** | native UFS LUN 2, controller `0x11270000`, APFS container mounted |
+| Partition table | **works** | phone GPT read; `xnusys` partition holds APFS system volume |
+| System image on flash | **works** | `xnusys` flashed with system APFS container (45,044 files, 16,547 dirs) |
+| The iOS volume as root | **works** | `vfs_switch_root` pivots `/flash` (`ufs_xnusys`) to `/`, ramdisk preserved at `/redwood` |
+| Data volume (`/private/var`) | **partial** | `/private/var` mounted as ramfs at boot; skeleton initialized with 8 preference files |
+| Writes to flash | **missing** | `CONFIG_UFS_WRITE` and `CONFIG_VAR_STORE` off; UFS driver read-only |
 | SD card | **missing** | no MT6893 SD host-controller driver exists |
-| Files app | **partial** | the "On My iPhone" provider exists but points at the empty ramfs |
+| Files app | **partial** | provider exists but points at temporary ramfs |
 
 ### 1.3 Screen and graphics
 
 | Area | State | Evidence |
 |---|---|---|
-| Panel | **works** | 1080×2400 on `OVL0_2L` (`0x14001000`), framebuffer `0x76a10000`, pitch 4352 |
-| Interface scale | **works** | 375×812 points at scale 3 (`display-scale=3`), verified at runtime |
-| Renderer | **works** | Mesa software GLES (`gl=1`): 190 `hakios-gl` lines, 1000+ frames, an IOSurface at 1125×2436, presented (`swap 1 layer 0: surface 4 (1125x2436 'BGRA')`) |
-| Metal / Mali-G77 | **missing** | Mesa's software GLES stands in; the Mali-G77 MC9 (`valhall-1691526.wa`) path is not brought up. The user wants METAL forked onto Mali and named **METAL-Mali** |
-| Home screen / wallpaper | **missing** | the picture on the panel is Darwin's **boot UI** (`BKBootUIPresenter`, `BKDisplayRenderOverlayAppleLogo`) — a 192×240 Apple logo at `@3x`, sustained, not late. The standard still wallpapers are already on the phone at `/Library/Wallpaper` and the software renderer can draw them; what is missing is the first-boot state that dismisses the overlay |
-| Lock screen, Notification Center, Control Center | **missing** | never tested interactively; all behind the overlay |
+| Panel & Pacing | **works** | 1080×2400 @ native 120Hz refresh rate (`fb_hz=120`, `fb_ca_hz=120`), uncapped VSync pacing via CA environment variables |
+| Interface scale | **works** | 375×812 points at scale 3 (`display-scale=3`) |
+| GPU Renderer | **works** | Mali-G77 MC9 accelerated via Panfrost (`HakiosPanfrostGPU`) + `hakios-gl` (Mesa OSMesa); 1,490+ frames rendered at smooth 120 FPS cadence, median work ~2.6 ms/frame |
+| Home Screen & Unlock | **works** | Apple boot logo overlay dismissed via `unlock(done=1)` in `inject_sb.c`; SpringBoard home screen and icons interactive |
+| Status Bar Visual Provider | **works** | `_UIStatusBarVisualProvider_Split1125` / `Split1080` fallback interposed; red `rdar://` debug banner eliminated |
+| Wallpaper | **works** | stock asset (`SydneyDarkWallpaper.jpg`) staged to `/share/wallpaper.jpg` and `/var/mobile/Library/wallpaper.jpg`, loaded via `UIImageView` on `SBWallpaperWindow` with AspectFill and poster sublayer hiding |
+| Widgets | **partial** | `com.apple.chronod` and `com.apple.mediaremoted` enabled with `RunAtLoad = True` and `KeepAlive = True` in LaunchDaemons |
+| Lock screen / Controls | **partial** | CoverSheet presentation dismissed at startup for immediate Home Screen access |
 | Setup Assistant | **partial** | deliberately bypassed by injection; `SetupDone = True` is installed every boot (the skeleton's 8 preference files); but it cannot persist without `/private/var`, and activation fails on Secure Enclave (`0xe00002c7`) |
 
 ### 1.4 Input

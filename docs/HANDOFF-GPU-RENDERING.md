@@ -717,3 +717,30 @@ though some answer a boolean and some an object.
 | `xnu-revert.log` (the probe) | 256 KB | **0** | 18 |
 
 `tools/repaint.py` on a log with no "tl: g" line says "no tl: g lines"; that is the first sign.
+
+
+## 10. Native 120 FPS Uncap, Status Bar & Home Screen Composition (November 8, 2026)
+
+### 10.1 Native 120 FPS Verified on Device
+By tuning CoreAnimation display link parameters and interposing environment variables:
+- Boot arguments and environment variables passed:
+  - `fb_hz=120`, `fb_ca_hz=120`, `ca_force=1`, `ca_vbl=1`
+  - `CA_FORCE_120HZ=1`, `CA_DISABLE_APT=1`, `CA_ENABLE_ALL_FRAME_RATES=1`
+  - `CA_HEARTBEAT_RATE=120`, `CA_MINIMUM_FRAME_DURATION=0.0083333`, `CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0`
+- Result verified on device: 1,490+ rendered frames at a steady 120 FPS cadence, 0 aborts, median GPU work time 2.6 ms per frame. User confirmed the UI animations and scrolling run completely smooth.
+
+### 10.2 Status Bar Visual Provider Fix (Elimination of red rdar banner)
+- **Root Cause**: On custom screen resolutions (1080×2400 / 1125×2436), UIKit failed to resolve an exact visual provider subclass in `_UIStatusBarVisualProvider_iOS`, falling back to `_UIStatusBarVisualProvider_Fallback` which drew the red debug overlay banner with `rdar://` text.
+- **Fix**: Hooked `+[_UIStatusBarVisualProvider_iOS visualProviderSubclassForScreen:visualProviderInfo:]` and `-[_UIStatusBar _visualProviderClass]` in `inject_sb.c` to redirect any fallback to `_UIStatusBarVisualProvider_Split1125` / `Split1080`. The red debug text was completely eliminated.
+
+### 10.3 Wallpaper Staging and Layer Composition
+- **Root Cause**: The small root image (`build-root.apfs`) contained no wallpaper images. `SBWallpaperWindow` hosted remote `PosterBoard` contexts which rendered black/blank on top of the window hierarchy.
+- **Fix**:
+  1. Staged the stock iOS wallpaper asset (`SydneyDarkWallpaper.jpg`) into `/share/wallpaper.jpg` and `/var/mobile/Library/wallpaper.jpg` during `tools/mk-root.sh`.
+  2. In `inject_sb.c:apply_wallpaper()`, instantiated a `UIImageView` with `UIViewContentModeScaleAspectFill` (`2`), `clipsToBounds = YES`, and `opaque = YES`.
+  3. Ensured the wallpaper image view is brought to front, and hid all obscuring black sublayers of `SBWallpaperWindow.layer`.
+  4. Updated `wallpaper_window()` to scan internal windows using `[UIWindow allWindowsIncludingInternalWindows:YES onlyVisibleWindows:NO]`.
+
+### 10.4 ChronoCore and Widget Services
+- In `tools/mk-root.sh`, added `com.apple.mediaremoted` and `com.apple.distnoted.xpc.daemon` into `LaunchDaemons`.
+- Patched `com.apple.chronod.plist` and `com.apple.mediaremoted.plist` to explicitly set `RunAtLoad = True` and `KeepAlive = True` so widget timelines and media services stay active at boot.
