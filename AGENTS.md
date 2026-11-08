@@ -80,6 +80,15 @@ needs. [docs/mt6893-facts.md](docs/mt6893-facts.md) is what the tree says.
 5. **Names**: new code uses `hakios_*`, `kern.hakios.*`, `/dev/hakios-*`. Files copied from the
    reference port keep the former `redwood_*` prefix until they are merged; do not rename them
    piecemeal.
+   The **image** is `zenith`: that is the name the project calls itself, and it is what the
+   identity strings say (the audio plug-in's manufacturer, the HID service's manufacturer, the
+   test programs' keys, the input thread's name).
+   The **mount point** is still `/redwood`, and that is not an oversight: the directory the
+   image is mounted on is inside the *prebuilt kernel's* own root filesystem
+   (`mach.development.mt6893`, whose root has the directory `redwood` in it), so the path can
+   only change by rebuilding the kernel from source. `redwood` is also the name of the
+   *reference phone* (the POCO X5 Pro, SM7325) and of the files copied from the reference port:
+   those keep it, and only those.
 6. **Commit messages say what the phone did** in the run that proved the change (a log line, a
    number), not only what the code does.
 
@@ -140,7 +149,7 @@ top of the common tree). Moving them under the common repository's `devices/<nam
 - `tools/fbshot.py` turns `fbshot=` lines into a picture of the screen (for your own checks only:
   never commit it).
 - `tools/frames.py` gives frame timing; `tools/cache-name.py` names shared-cache addresses.
-- `kern.redwood.ustack` and SpringBoard's `sb_prof=` sampler find what a process spends its CPU
+- `kern.hakios.ustack` and SpringBoard's `sb_prof=` sampler find what a process spends its CPU
   on.
 
 ## State, briefly
