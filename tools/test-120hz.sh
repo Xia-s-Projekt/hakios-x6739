@@ -17,7 +17,7 @@
 #   fbscale=2 fbfit=3        the picture is scaled onto the panel, and fitted
 #   fb_queue=1 fb_flip=1     one swap may wait for the panel, and the picture is flipped
 #   caenv=CA_FORCE_120HZ=1   THE ONE THAT MATTERS: CoreAnimation's clock was at 10 Hz without it
-#   caenv=CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0   the window server renders every refresh
+#   caenv=CA_DISABLE_APT=1   the window server renders every 120 Hz refresh (bypasses tick divider)
 #   touch_lat=1              a line for every frame (the "tl: g" lines tools/repaint.py reads)
 #
 # The result is in logs/xnu-120hz.log, and tools/repaint.py reads the frame rate out of it.
@@ -28,10 +28,10 @@ SECS=${XNU_SECS:-300}
 LOG=${XNU_LOG_OUT:-$ROOT/logs/xnu-120hz.log}
 ARGS=${XNU_ARGS:-"cpus=4 touchscreen=1 mali=6 mali_clk=2 ca_force=1 ca_vbl=1 fb_hz=120 fb_ca_hz=120 \
 fbscale=2 fbfit=3 fb_queue=1 fb_flip=1 touch_lat=1 caenv=CA_FORCE_120HZ=1 \
-caenv=CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0 \
+caenv=CA_DISABLE_APT=1 \
+caenv=CA_ENABLE_ALL_FRAME_RATES=1 \
 caenv=CA_HEARTBEAT_RATE=120 \
 caenv=CA_MINIMUM_FRAME_DURATION=0p0083333 \
-caenv=CADisableMinimumFrameDurationOnPhone=1 \
 caenv=CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0"}
 
 echo "test-120hz.sh: a ${SECS} s run; the log is $LOG"
