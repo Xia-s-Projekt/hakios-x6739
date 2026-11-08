@@ -8,7 +8,7 @@ This is the state of the port, area by area, with what is proven and what is not
 written from the run logs and the source, not from intention. A line that says *missing*
 means it has never been seen to work on the phone.
 
-Last updated 2026-11-08. Current commit: `254a6e0`. Read `docs/HANDOFF-GPU-RENDERING.md`
+Last updated 2026-11-08. Current commit: `ca97255`. Read `docs/HANDOFF-GPU-RENDERING.md`
 for the GPU acceleration, 120Hz pacing, and UI rendering details, and
 `docs/ios-screen-state.md` for the screen state history.
 
@@ -65,11 +65,12 @@ works, but the top is not proven. **missing** = never seen working.
 | Panel & Pacing | **works** | 1080×2400 @ native 120Hz refresh rate (`fb_hz=120`, `fb_ca_hz=120`), uncapped VSync pacing via CA environment variables |
 | Interface scale | **works** | 375×812 points at scale 3 (`display-scale=3`) |
 | GPU Renderer | **works** | Mali-G77 MC9 accelerated via Panfrost (`HakiosPanfrostGPU`) + `hakios-gl` (Mesa OSMesa); 1,490+ frames rendered at smooth 120 FPS cadence, median work ~2.6 ms/frame |
-| Home Screen & Unlock | **works** | Apple boot logo overlay dismissed via `unlock(done=1)` in `inject_sb.c`; SpringBoard home screen and icons interactive |
+| Home Screen & Navbar | **works** | `SBHomeScreenWindow` preserved transparent (`clearColor`, `opaque = NO`) and interactive (`userInteractionEnabled = YES`); app icons, widget platters, dock, and `SBHomeGrabberView` / `MTLumaDodgePillView` visible and active |
 | Status Bar Visual Provider | **works** | `_UIStatusBarVisualProvider_Split1125` / `Split1080` fallback interposed; red `rdar://` debug banner eliminated |
-| Wallpaper | **works** | stock asset (`SydneyDarkWallpaper.jpg`) staged to `/share/wallpaper.jpg` and `/var/mobile/Library/wallpaper.jpg`, loaded via `UIImageView` on `SBWallpaperWindow` with AspectFill and poster sublayer hiding |
-| Widgets | **partial** | `com.apple.chronod` and `com.apple.mediaremoted` enabled with `RunAtLoad = True` and `KeepAlive = True` in LaunchDaemons |
-| Lock screen / Controls | **partial** | CoverSheet presentation dismissed at startup for immediate Home Screen access |
+| Wallpaper Window Isolation | **works** | Wallpaper strictly targeted to `_SBWallpaperSecureWindow`; poster obscuring layers suppressed; zero overdraw on `SBHomeScreenWindow` |
+| Widgets | **partial** | `com.apple.chronod` and `com.apple.mediaremoted` enabled with `RunAtLoad = True` and `KeepAlive = True`; 27+ widget extensions spawned and rendering |
+| CoverSheet (Notification Center) | **works** | Removed destructive window hiding; one-shot `unlock(done=1)` prevents recurring dismissal; Darwin notification `com.hakios.coversheet` registered |
+| Control Center (Quick Settings) | **works** | Calibrated top-edge swipe threshold (`EDGE_TOP = 48.0 / 812`, ~142 px); Darwin notification `com.hakios.cc` registered for instant programmatic toggle |
 | Setup Assistant | **partial** | deliberately bypassed by injection; `SetupDone = True` is installed every boot (the skeleton's 8 preference files); but it cannot persist without `/private/var`, and activation fails on Secure Enclave (`0xe00002c7`) |
 
 ### 1.4 Input
@@ -79,6 +80,7 @@ works, but the top is not proven. **missing** = never seen working.
 | Touch hardware (loader) | **works** | the loader reads the FT3681 on I2C0 (`chip_id=0x5662`, fw `0x44`, vendor `0x8d`) and a **real finger** (`event=0x0 x=9482 y=30656 area=16` → 593×1916) |
 | Touch driver in the kernel | **partial** | `kernel/bsd/dev/hakios.ft3681.c` runs (58,800 reads, 0 failures) but every report is byte-identical and matches the panel's chip-information block, not a touch frame; one sample posted, x saturated at 65535 |
 | Touch path below the hardware | **works** | FT3681 → `/dev/hakios-touch` → `libhakios.dylib` → backboardd's virtual HID; backboardd counts the digitizer's events and the unlock notification is posted |
+| Edge gesture recognition | **works** | `EDGE_TOP` and `EDGE_BOTTOM` calibrated to 48 pt (~142 px), `EDGE_SIDE` to 24 pt (~69 px); `DIGITIZER_FROM_EDGE_TIP` (0x800) properly flagged for human finger swipe down/up |
 | Buttons (power, volume) | **missing** | the PMIC arbiter is mapped but nothing is read from it |
 | Touch IRQ | **missing** | GPIO 21 / GIC SPI 245 is known but the driver polls every 5 ms instead |
 

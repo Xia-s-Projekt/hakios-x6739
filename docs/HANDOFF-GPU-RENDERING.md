@@ -744,3 +744,50 @@ By tuning CoreAnimation display link parameters and interposing environment vari
 ### 10.4 ChronoCore and Widget Services
 - In `tools/mk-root.sh`, added `com.apple.mediaremoted` and `com.apple.distnoted.xpc.daemon` into `LaunchDaemons`.
 - Patched `com.apple.chronod.plist` and `com.apple.mediaremoted.plist` to explicitly set `RunAtLoad = True` and `KeepAlive = True` so widget timelines and media services stay active at boot.
+
+
+## 11. Window Hierarchy Overdraw, Touch Calibration & Gestures (November 8, 2026)
+
+### 11.1 The Overdraw Problem (Wallpaper Covering UI)
+- **Symptom**: Only the wallpaper and status bar were visible on screen. Home screen icons, widget platters, the dock, and the home navigation bar (the grabber pill) disappeared, and touches appeared completely dead.
+- **Root Cause**:
+  1. In `userland/src/inject_sb.c:apply_wallpaper()`, the window selector checked:
+     ```c
+     if (level < -0.5 || (cname && strstr(cname, "Wallpaper") && !strstr(cname, "Effect") && !strstr(cname, "HomeScreen")))
+     ```
+     Because `level < -0.5` was checked before the `||`, any window with a negative `windowLevel` matched regardless of class name.
+  2. In iOS 16 UIKit, `SBHomeScreenWindow` has `windowLevel = -1.0`! It falsely matched this check, causing `apply_wallpaper()` to attach a full-screen opaque `UIImageView` directly to `SBHomeScreenWindow`, bring it to front, and **hide all other sublayers** of `SBHomeScreenWindow.layer`.
+  3. This hid all home screen subviews: the icon grid, widget platter views, dock, and `SBHomeGrabberView` (which contains `MTLumaDodgePillView`, the home bar).
+  4. Furthermore, lines 1312–1319 in `inject_sb.c` forcibly executed `setHidden: YES` and `setUserInteractionEnabled: NO` on `SBCoverSheetWindow` whenever `is_unlocked != 0`. Because Notification Center in iOS 16 *is* `SBCoverSheetWindow`, Notification Center was permanently disabled and hidden.
+  5. `unlock()` was repeatedly invoked by `battery_post_notifications()` on every battery tick, slamming CoverSheet shut (`setCoverSheetPresented: NO`) continuously.
+
+### 11.2 The Fix
+1. **Strict Window Filtering (`inject_sb.c`)**:
+   - Wallpaper is strictly targeted to windows matching `_SBWallpaperWindow` or `_SBWallpaperSecureWindow`:
+     ```c
+     if (strcmp(cname, "_SBWallpaperWindow") == 0 || strcmp(cname, "_SBWallpaperSecureWindow") == 0)
+     ```
+   - On the wallpaper window: `UIImageView` has `userInteractionEnabled = NO`, `clipsToBounds = YES`, `opaque = YES`, and is sent to back (`sendSubviewToBack: iv`). Black poster backdrop sublayers are hidden *only* within this window.
+2. **HomeScreen Window Transparency and Sublayer Restoration**:
+   - `SBHomeScreenWindow` is explicitly kept transparent (`backgroundColor = clearColor`, `opaque = NO`), fully interactive (`userInteractionEnabled = YES`), and key (`makeKeyWindow`).
+   - Every sublayer of `SBHomeScreenWindow.layer` is checked and unhidden (`setHidden: NO`), ensuring all app icons, widget platters, dock, and the home grabber bar are visible.
+3. **CoverSheet & Lock Screen Decoupling**:
+   - Removed destructive `setHidden: YES` and `setUserInteractionEnabled: NO` overrides on `SBCoverSheetWindow`.
+   - Made `unlock()` strictly idempotent (`if (is_unlocked) return;`), dismissing the initial lockscreen once at boot and leaving CoverSheet ready for swipe-down.
+4. **Touch Edge Calibration for Gestures (`userland/src/inject.c`)**:
+   - In `inject.c`, edge thresholds were previously `EDGE_TOP = 16.0 / 812` (~47 px) and `EDGE_BOTTOM = 34.0 / 812` (~100 px). On a 1080×2400 physical display, a human thumb touch at the top of the screen lands at 50–120 px, missing the tiny 47 px threshold. Without `DIGITIZER_FROM_EDGE_TIP` (0x800), SpringBoard's system edge gesture recognizers ignored the swipe.
+   - Updated thresholds:
+     ```c
+     #define EDGE_SIDE       (24.0 / 375)
+     #define EDGE_TOP        (48.0 / 812)
+     #define EDGE_BOTTOM     (48.0 / 812)
+     ```
+     This expands the edge contact zones to ~142 physical pixels at top and bottom, and ~69 pixels at the sides, ensuring natural human thumb swipes trigger Control Center (top-right swipe down), Notification Center (top-left swipe down), and Home/Switcher (bottom swipe up).
+5. **Darwin Notifications for Control Center and CoverSheet**:
+   - Registered `com.hakios.cc` and `com.hakios.coversheet` in `inject_sb.c` allowing immediate programmatic toggling via `rwtouch notify com.hakios.cc` and `rwtouch notify com.hakios.coversheet`.
+
+### 11.3 Device Verification
+Verified via `xnu-cycle.sh` on device `102562537K104189` (`logs/xnu-iter.log`):
+- `inject_report: [SpringBoard] wallpaper_view_added(_SBWallpaperSecureWindow)` — wallpaper attached exclusively to `_SBWallpaperSecureWindow`, with zero overdraw on `SBHomeScreenWindow`.
+- `inject_report: [SpringBoard] unlock(done=1)` — executed exactly once at boot.
+- App icons and glyphs composited cleanly: `attachImage: texture 120 is IOSurface 133 (97 x 76)`, `texture 123 is IOSurface 136 (103 x 103)`, `texture 126 is IOSurface 139 (101 x 101)`.
