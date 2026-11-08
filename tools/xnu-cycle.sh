@@ -11,7 +11,14 @@ OUT=${XNU_LOG_OUT:-$ROOT/logs/xnu-last.log}
 SECS=${XNU_SECS:-45}
 # XNU_ARGS: the kernel's own command line (cores and so on); the clock comes from this machine
 # touchscreen=1: the kernel's touch driver (kernel/bsd/dev/hakios.ft3681.c) starts only with it
-XNU_ARGS=${XNU_ARGS:-cpus=4 touchscreen=1 gl=1}
+DEFAULT_ARGS="cpus=4 touchscreen=1 mali=6 mali_clk=2 ca_force=1 ca_vbl=1 fb_hz=120 fb_ca_hz=120 \
+fbscale=2 fbfit=3 fb_queue=1 fb_flip=1 touch_lat=1 caenv=CA_FORCE_120HZ=1 \
+caenv=CA_DISABLE_APT=1 \
+caenv=CA_ENABLE_ALL_FRAME_RATES=1 \
+caenv=CA_HEARTBEAT_RATE=120 \
+caenv=CA_MINIMUM_FRAME_DURATION=0p0083333 \
+caenv=CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0"
+XNU_ARGS=${XNU_ARGS:-$DEFAULT_ARGS}
 # the device tree offers the kernel exactly this many cores; "cpus=" in XNU_ARGS should match
 CORES=${XNU_CORES:-$(expr "$XNU_ARGS" : '.*cpus=\([0-9]*\)' || echo 1)}
 [ -n "$CORES" ] || CORES=1

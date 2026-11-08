@@ -90,6 +90,36 @@ if [ -f "$WP_SRC" ]; then
 	cp "$WP_SRC" "$ROOT/build-root/share/wallpaper.jpg"
 	cp "$WP_SRC" "$ROOT/build-root/var/mobile/Library/wallpaper.jpg"
 fi
+# Mobile directories and preference caches for widgets and apps:
+# WeatherWidget and other apps crash immediately if $HOME/Documents is missing
+# (Swift force-unwraps urls(for: .documentDirectory, in: .userDomainMask).first!)
+mkdir -p "$ROOT/build-root/var/mobile/Documents" \
+	"$ROOT/build-root/var/mobile/Library/Weather" \
+	"$ROOT/build-root/var/mobile/Library/Preferences" \
+	"$ROOT/build-root/var/mobile/Containers/Shared/AppGroup"
+printf 'd\t755\t501\t501\t/private/var/mobile/Documents\n' >> "$ROOT/build-root/etc/var.skel"
+printf 'd\t755\t501\t501\t/private/var/mobile/Library/Weather\n' >> "$ROOT/build-root/etc/var.skel"
+printf 'd\t755\t501\t501\t/private/var/mobile/Containers/Shared/AppGroup\n' >> "$ROOT/build-root/etc/var.skel"
+python3 -c "
+import plistlib
+p = '$ROOT/build-root/var/mobile/Library/Preferences/com.apple.weather.plist'
+plistlib.dump({
+    'Cities': [{
+        'Name': 'Cupertino',
+        'State': 'CA',
+        'Lat': 37.33182,
+        'Lon': -122.03118,
+        'Timezone': 'America/Los_Angeles',
+    }],
+    'LastViewedCity': 0,
+    'Celsius': False,
+}, open(p, 'wb'))
+"
+printf 'f\t644\t501\t501\t/private/var/mobile/Library/Preferences/com.apple.weather.plist\t/var/mobile/Library/Preferences/com.apple.weather.plist\n' >> "$ROOT/build-root/etc/var.skel"
+# Hook WeatherWidget with libhakios.app.dylib for diagnostic output on /dev/console
+if [ -f "$ROOT/build-root/etc/inject.conf" ]; then
+	sed -i -e 's|/redwood/lib/libhakios.app.dylib Sileo|/redwood/lib/libhakios.app.dylib Sileo WeatherWidget|' "$ROOT/build-root/etc/inject.conf"
+fi
 # The jobs the phone's launchd starts. The tree's own list (userland/root/LaunchDaemons) is what
 # the tree built; the wallpaper needs more of them: PosterBoard, which draws the wallpaper live in
 # its own process, never starts without the daemons it waits for. The tree's notes (docs/ru/notes.md)
@@ -119,17 +149,18 @@ if [ "${HAKIOS_QUIET_JOBS:-0}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d 
 	# phone's console drops lines when there is a lot of output on it, and the window server's
 	# own line about the screen is early in the run: with the whole job set going, it is gone
 	# before the log comes back.
-	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored chronod mediaremote" \
+	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored chronod mediaremote weatherd" \
 		OSLOG="com.apple.backboardd" \
 		python3 mkjobs.py --rest ../sysimage/rootfs "$ROOT/build-root/LaunchDaemons" \
 		com.apple.notifyd com.apple.logd com.apple.containermanagerd com.apple.containermanagerd.system \
 		com.apple.runningboardd com.apple.backboardd com.apple.mobile.usermanagerd com.apple.lsd \
 		com.apple.iconservices.iconservicesagent com.apple.pluginkit.pkd com.apple.SpringBoard \
 		com.apple.nsurlsessiond com.apple.cloudd com.apple.syncdefaultsd com.apple.appstored \
-		com.apple.chronod com.apple.mediaremoted com.apple.distnoted.xpc.daemon) >/dev/null 2>&1
+		com.apple.chronod com.apple.mediaremoted com.apple.distnoted.xpc.daemon \
+		com.apple.weatherd) >/dev/null 2>&1
 	python3 -c "
 import plistlib, os
-for label in ('com.apple.chronod', 'com.apple.mediaremoted'):
+for label in ('com.apple.chronod', 'com.apple.mediaremoted', 'com.apple.weatherd'):
     p = os.path.join('$ROOT/build-root/LaunchDaemons', f'{label}.plist')
     if os.path.isfile(p):
         d = plistlib.load(open(p, 'rb'))
