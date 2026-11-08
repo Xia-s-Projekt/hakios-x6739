@@ -60,6 +60,7 @@ fi
 # image's /lib as /redwood/lib, and the window server's library (libhakios.dylib, injected into
 # backboardd) opens /redwood/lib/libhakios.gl.dylib from there.
 if [ -f "$GL_DIR/libhakios.gl.dylib" ] && [ -f "$MESA_DIR/libOSMesa.8.dylib" ]; then
+	rm -f "$ROOT/build-root/lib/libOSMesa.8.dylib" "$ROOT/build-root/lib/libhakios.gl.dylib"
 	cp "$GL_DIR/libhakios.gl.dylib" "$ROOT/build-root/lib/"
 	cp "$MESA_DIR/libOSMesa.8.dylib" "$ROOT/build-root/lib/"
 else
@@ -111,13 +112,14 @@ if [ "${HAKIOS_QUIET_JOBS:-0}" != 1 ] && [ -x "$(command -v python3)" ] && [ -d 
 	# phone's console drops lines when there is a lot of output on it, and the window server's
 	# own line about the screen is early in the run: with the whole job set going, it is gone
 	# before the log comes back.
-	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored" \
+	(cd "$COMMON/userland" && ALLOW="cloudd nsurlsessiond syncdefaultsd appstored chronod" \
 		OSLOG="com.apple.backboardd" \
 		python3 mkjobs.py --rest ../sysimage/rootfs "$ROOT/build-root/LaunchDaemons" \
 		com.apple.notifyd com.apple.logd com.apple.containermanagerd com.apple.containermanagerd.system \
 		com.apple.runningboardd com.apple.backboardd com.apple.mobile.usermanagerd com.apple.lsd \
 		com.apple.iconservices.iconservicesagent com.apple.pluginkit.pkd com.apple.SpringBoard \
-		com.apple.nsurlsessiond com.apple.cloudd com.apple.syncdefaultsd com.apple.appstored) >/dev/null 2>&1
+		com.apple.nsurlsessiond com.apple.cloudd com.apple.syncdefaultsd com.apple.appstored \
+		com.apple.chronod) >/dev/null 2>&1
 fi
 # The patch of init's binary: launchd's standard output and standard error go to /dev/null when
 # /etc/quiet is there (otherwise launchd floods the console). The offsets are the addresses of
