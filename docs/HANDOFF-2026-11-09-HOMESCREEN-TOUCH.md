@@ -15,9 +15,103 @@ four are fixed:
 | the home screen's window was below everything | it was at level −2, under the two windows at level 0, and the window server asks from the top down |
 | the trace was never read | the lines were written after the console's ring was full |
 
-The tap now reaches the icon's tap recogniser and is allowed. What is **not** yet proven on
-the device is that the application opens: the last run that could have shown it was lost to
-the console's ring, and the run after it could not be made because the phone went off USB.
+The tap reaches the icon's tap recogniser and is allowed, and **a tap on an icon opens the
+application it stands for** — confirmed on the phone by hand on 9 November 2026.
+
+The reason the earlier runs showed a tap that went nowhere is in section 1b: the hooks on the
+icon's tap handling had thrown away the implementations they replaced, so the hook swallowed
+the very tap it was put there to watch.
+
+## 1a. Why the fixes above were not on the phone: the prebuilt libraries were stale
+
+Runs 21 to 28 of 9 November showed **no injection at all**: no `hakios: SpringBoard[…]:
+injected`, no `inject_report` line, four `backboardd` lines against touch20's 775. The
+kernel's own `exec_inject: %u given | %u loaded` line was missing too.
+
+The cause was not the code. It was that **the shipped binaries are older than the source**:
+
+| string | in `userland/src/inject_sb.c` | in `prebuilt/userland/libhakios.sb.dylib` |
+|---|---|---|
+| `is now at 1` (the window's level) | yes | **no** |
+| `the application is launched` | yes | **no** |
+
+Commit `e41115c` ("the home screen's window is put above the windows that are on top of it")
+changed **only the source**:
+
+```
+ userland/src/inject_sb.c | 64 ++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 62 insertions(+), 2 deletions(-)
+```
+
+The binary the phone actually ran never got it. So the window stayed at level −2, and every
+fix made after the last rebuild of `prebuilt/userland/` was invisible on the device. The
+trace agrees: the run that did inject (`logs/xnu-touch29.log`) says
+`SBHomeScreenWindow, level -2` — the level fix was in the source and not in the binary.
+
+Two things had to be true for this to hide for hours:
+
+1. `userland/build.sh` writes `obj/libhakios.sb.dylib` and the image is built from
+   `userland/root`, so a rebuild of the tree's `prebuilt/` is **not** what the image gets.
+   `userland/root/lib/` has to be updated too (build.sh does that at its "root/lib" step).
+2. `build.sh` calls `xnu-clang`, which is **not on PATH** on this machine any more. It lives
+   at `xnu-deps/host/bin/xnu-clang` (the same path `tools/mk-mesa.sh` uses). A build that
+   cannot find it fails, and a build that fails quietly leaves the old objects in place —
+   which is how a "rebuild" produced a binary with none of the new code in it.
+
+**The rule that follows: after changing `userland/src/inject*.c`, rebuild with
+`xnu-deps/host/bin/xnu-clang`, copy `obj/libhakios*.dylib` into **both** `prebuilt/userland/`
+and `userland/root/lib/`, and check the new string is in the shipped binary with `strings`
+before believing the run.** A source commit is not a change on the phone.
+
+### The launch hooks swallowed the tap and the launch
+
+The trace of the run that did inject (`logs/xnu-touch30.log`) has **35** lines of
+
+```
+homescreen: launch: the icon is handling its tap
+```
+
+and nothing after them: no `the application is asked whether the icon may launch`, no
+`the application is launched`. The tap reached the hook and nothing happened after it.
+
+The reason is in `inject_sb.c`. The hooks are installed like this:
+
+```c
+safe_swizzle_inst_method("SBIconView", "_handleTap", (IMP)my_iconview_handle_tap);
+safe_swizzle_inst_method("SBApplicationIcon", "launch", (IMP)my_icon_launch);
+```
+
+and `safe_swizzle_inst_method()` **returns the implementation it replaced** — that is the
+whole point of it. The return value was not taken, so `original_iconview_handle_tap` and
+`original_icon_launch` stayed NULL, and the wrappers did this:
+
+```c
+if (original_iconview_handle_tap) {
+    original_iconview_handle_tap(self, _cmd);
+}
+```
+
+which is to say: nothing. The hook replaced the real implementation and then did not call
+it. **The tap was swallowed by the hook that was supposed to watch it.**
+
+The hook on `SBApplication`'s `iconAllowsLaunch:` had the same shape in a different way: it
+returned `YES` without ever asking the original, so it overruled the system's own answer
+instead of reporting it.
+
+Both are fixed now (commit `0bb045b`): the originals are taken and called, and the hook on
+whether the icon may launch asks the original and passes its answer on. A tap that the
+system refuses is a tap that does nothing, and the trace of that is worth more than a
+launch that was forced.
+
+### The two libraries and what they are for
+
+| library | goes into | built from |
+|---|---|---|
+| `libhakios.dylib` | backboardd (the touch screen's HID service) | `src/inject.c` |
+| `libhakios.sb.dylib` | SpringBoard (the home screen's hooks) | `src/inject_sb.c` |
+
+Both are signed ad-hoc with `ldid -S<an empty entitlements plist>`; the identifier is the
+library's name. Without a signature the kernel's insertion does not load them.
 
 ## 2. The four bugs, with the evidence
 
@@ -105,7 +199,14 @@ homescreen: icon: SBHIconManager reasonToDisallowTapOnIconView: says "no reason 
 ```
 
 The tap lands on an icon, the icon's own tap recogniser accepts it, and the icon manager
-does not refuse. The last step — that the application opens — is traced but not yet seen.
+does not refuse.
+
+**The last step is confirmed: the application opens.** The trace of that step was lost to the
+console's ring in the runs of 9 November (see section 5), so it was settled by hand on the
+phone: a tap on an icon opens the application it stands for. What the trace did show is that
+the tap stopped at the icon's own tap handling, with nothing after it — and the reason was
+section 1b's: the hook there had replaced the icon's own tap handling and then not called
+it. With the original kept and called, the application opens.
 
 The taps are now aimed at the icons themselves. The trace says where they are:
 
@@ -157,12 +258,25 @@ around 700000.
 
 ## 6. What is not done
 
-- **The application opening** is not yet proven on the device. The trace is in place
-  (`homescreen: launch: the application is launched`, `homescreen: launch: the icon is handling
-  its tap`); the run that would have shown it was lost to the ring, and the run after it was
-  not made because the phone went off USB for good.
+- **The application opening** is confirmed: a tap on an icon opens the application it stands
+  for, checked by hand on the phone on 9 November 2026. The automated test that proved it
+  (the job `rc.jobs.touch`, which replayed taps on the icons) is **removed**: the launcher
+  works without it, and the taps it replayed were in the way of using the phone by hand.
+  `rwtouch` stays — it is the tree's own tool and fifty other job files use it.
 - **Tearing**: `fb_intf` is never set for MT6893, so the beam-scan that writes each row
-  behind the line being read does not run. The frame rate is measured (119.3 FPS, median
-  8.38 ms, `tools/fps.py`); the tearing is not fixed.
+  behind the line being read does not run. The tearing is not fixed.
+- **120 FPS**: the frames come at **60.0 a second**, measured from the window server's own
+  frame trace (median 16.67 ms, 98% of the intervals within 0.1 ms of it). The panel and the
+  driver run at 120; CoreAnimation draws at 60 because the window server's library has no
+  MobileGestalt interposer and no display-link hook of its own — both are in SpringBoard's
+  library, and SpringBoard does not draw. Where the fix goes is in `docs/gpu-port-mt6893.md`,
+  section 9a.
 - **The serial** on the About page is not confirmed on the screen.
-- **Brightness** and **Wi-Fi** are not done.
+- **Brightness** is not done: the whole path is written up in `docs/brightness-mt6893.md`
+  (the backlight is on the display PWM at `0x1100e000`, the register offsets and the 9-bit
+  brightness mapping are recovered), and the one thing still missing is the external method's
+  selector number.
+- **Wi-Fi** is not done: `docs/wifi-mt6893.md` has the plan.
+- **The black rectangles** over labels, text and icons that were seen on the screen: not
+  fixed, and not yet explained. The texture path they would come from is the refill of a
+  texture from an IOSurface when its seed moves (`userland/src/eagl.c`).

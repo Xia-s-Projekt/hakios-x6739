@@ -631,6 +631,71 @@ rendering on Mali-G77 MC9 (Valhall v9):
 4. **WindowServer**:
    - `backboardd alive [gl=renderer_ok(0x10ab04860), hooks_ok(r=1,b=1,f=1,rend=1)]`
 
+## 9a. The frames come at 60 a second, and where the cap is
+
+Measured on 9 November 2026 from the window server's own frame trace
+(`tools/fps.py logs/xnu-touch31.log`):
+
+```
+the steady rate: 89 intervals, median 16.67 ms = 60.0 FPS
+  87 of 89 within 0.1 ms of it (98%)
+```
+
+98% of the intervals within a tenth of a millisecond of the median is a **hard lock** to
+16.67 ms, not a slow GPU: the frame itself costs 2.9-3.1 ms (the trace's own `whole` figure),
+which leaves 13 ms of the 16.67 idle.
+
+The driver says the same thing from its side:
+
+```
+MiniIOMobileFramebuffer: 301 frames in 5002 ms (60 a second), 2843 us each in the driver
+MiniIOMobileFramebuffer: 602 refreshes told (0 dropped) in that time
+```
+
+602 refreshes in 5 s is the panel's 120 Hz being told to the system; 301 frames is what
+CoreAnimation actually drew. So the panel and the driver run at 120 and the *drawing* runs at
+60.
+
+What CoreAnimation believes, from `fps_info` (it is in the image and reads the numbers
+CoreAnimation itself publishes):
+
+```
+fps_info: MobileGestalt DeviceSupports120HzRefreshRate = (none)
+fps_info: MobileGestalt DeviceSupportsProMotion = (none)
+fps_info: MobileGestalt MaxRefreshRate = (none)
+fps_info: CADisplay mainDisplay: _maximumFramesPerSecond = 0
+fps_info: CADisplay mainDisplay: _refreshRate = inf
+```
+
+The window server asks MobileGestalt for these and gets nothing: `inject.c` sets
+`CA_FORCE_120HZ=1` and friends in the window server's environment, and `inject_sb.c`
+interposes `MGCopyAnswer` for `DeviceSupports120HzRefreshRate` and `MaxRefreshRate` — but
+**the interposer is in SpringBoard's library, and SpringBoard does not draw the frames.**
+The window server gets `libhakios.dylib` (it is the library that speaks to the touch screen
+and to CoreAnimation), and that library has no MobileGestalt interposer at all. The same is
+true of the display-link hooks: `inject_sb.c`'s `setPreferredFramesPerSecond:` and
+`setPreferredFrameRateRange:` hooks live in SpringBoard, not in the window server.
+
+So the two places to change are both in `libhakios.dylib` (`userland/src/inject.c`), which is
+the window server's library:
+
+1. the MobileGestalt interposer (`DeviceSupports120HzRefreshRate`, `DeviceSupportsProMotion`,
+   `MaxRefreshRate`), now only in `inject_sb.c`;
+2. the display link's rate, where `inject_sb.c` sets `{0, 0, 0}` for the window server's own
+   link — a range whose maximum is 0 is CoreAnimation's "use the default", and the default
+   is the built-in 60 Hz panel.
+
+The framebuffer driver is not the limit: it paces on `fb_hz` (120) and publishes
+`IOMFBDisplayRefresh` at 120 Hz, and the log says so
+(`DisplayRefresh: 120 Hz (the panel: 120)`). But it publishes no `MaximumFramesPerSecond` in
+its mode dictionary, and that is the key CoreAnimation reads for the screen's maximum.
+
+A measurement note: `tools/fps.py` was wrong until 9 November. The frame census leaves out
+most frames (the console's ring is short), so the time between two lines is the time
+between the frames they count, not the time of one frame; the tool now divides by the
+frame-number difference. Before that it read 3.0 FPS for a 60 FPS run and 119.3 for a run
+whose census said every frame.
+
 ## 10. Sources
 
 Everything cited above is in the local trees:

@@ -65,7 +65,12 @@ def main():
         dt = t1 - t0
         if dt <= 0:
             continue
-        intervals.append((t1, n1, dt))
+        # the trace does not say every frame: the census leaves out most of them, so the
+        # time between two lines is the time between the frames they count, not one frame
+        gap = n1 - n0
+        if gap < 1:
+            continue
+        intervals.append((t1, n1, dt / gap))
 
     # the frames that came at a steady rate: the run's first and last frames are slow
     steady = intervals[1:-1] if len(intervals) > 4 and not every else intervals
