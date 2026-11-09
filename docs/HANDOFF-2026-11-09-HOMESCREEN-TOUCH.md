@@ -63,6 +63,22 @@ Two things had to be true for this to hide for hours:
 and `userland/root/lib/`, and check the new string is in the shipped binary with `strings`
 before believing the run.** A source commit is not a change on the phone.
 
+**The rule, for the record** (it belongs in the common tree's own instructions too):
+
+1. The image is built from `userland/root/`, not from `prebuilt/userland/`. A change in
+   `userland/src/` reaches the phone only through `userland/root/lib/`.
+2. `userland/build.sh` calls `xnu-clang`, which is **not on PATH** on this machine: the
+   compiler is `xnu-deps/host/bin/xnu-clang` (the same path `tools/mk-mesa.sh` uses). A build
+   that cannot find it fails, and a failed build leaves the old objects in place, so the
+   "rebuilt" binary is the old one.
+3. The libraries are signed ad-hoc: `ldid -S<an empty entitlements plist>`, which gives the
+   identifier the library's own name.
+
+So the three steps are: build with `xnu-deps/host/bin/xnu-clang`, sign, copy into **both**
+`prebuilt/userland/` and `userland/root/lib/` — and then check with `strings` that the code
+you just wrote is in the binary that ships. `strings prebuilt/userland/libhakios.sb.dylib |
+grep 'is now at 1'` is the check that would have caught it in minutes.
+
 ### The launch hooks swallowed the tap and the launch
 
 The trace of the run that did inject (`logs/xnu-touch30.log`) has **35** lines of
