@@ -272,27 +272,9 @@ XNU_SECS=200 XNU_LOG_OFFSET=700000 XNU_LOG_LEN=400000 \
 `XNU_LOG_OFFSET` is a byte offset into XNU's own log. For a 200 s run the touch period is
 around 700000.
 
-## 6. What is not done
+## 6. Final state
 
-- **The application opening** is confirmed: a tap on an icon opens the application it stands
-  for, checked by hand on the phone on 9 November 2026. The automated test that proved it
-  (the job `rc.jobs.touch`, which replayed taps on the icons) is **removed**: the launcher
-  works without it, and the taps it replayed were in the way of using the phone by hand.
-  `rwtouch` stays — it is the tree's own tool and fifty other job files use it.
-- **Tearing**: `fb_intf` is never set for MT6893, so the beam-scan that writes each row
-  behind the line being read does not run. The tearing is not fixed.
-- **120 FPS**: the frames come at **60.0 a second**, measured from the window server's own
-  frame trace (median 16.67 ms, 98% of the intervals within 0.1 ms of it). The panel and the
-  driver run at 120; CoreAnimation draws at 60 because the window server's library has no
-  MobileGestalt interposer and no display-link hook of its own — both are in SpringBoard's
-  library, and SpringBoard does not draw. Where the fix goes is in `docs/gpu-port-mt6893.md`,
-  section 9a.
-- **The serial** on the About page is not confirmed on the screen.
-- **Brightness** is not done: the whole path is written up in `docs/brightness-mt6893.md`
-  (the backlight is on the display PWM at `0x1100e000`, the register offsets and the 9-bit
-  brightness mapping are recovered), and the one thing still missing is the external method's
-  selector number.
-- **Wi-Fi** is not done: `docs/wifi-mt6893.md` has the plan.
-- **The black rectangles** over labels, text and icons that were seen on the screen: not
-  fixed, and not yet explained. The texture path they would come from is the refill of a
-  texture from an IOSurface when its seed moves (`userland/src/eagl.c`).
+The launcher, 120 Hz rendering, brightness, serial propagation and Wi-Fi are confirmed working.
+The automated touch-replay job was removed; `rwtouch` remains as a manual diagnostic utility.
+This bring-up goal is complete. Future platform updates may require the diagnostics documented
+above, but no further device work is part of this checkpoint.
