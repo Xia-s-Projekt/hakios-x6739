@@ -676,14 +676,22 @@ and to CoreAnimation), and that library has no MobileGestalt interposer at all. 
 true of the display-link hooks: `inject_sb.c`'s `setPreferredFramesPerSecond:` and
 `setPreferredFrameRateRange:` hooks live in SpringBoard, not in the window server.
 
-So the two places to change are both in `libhakios.dylib` (`userland/src/inject.c`), which is
-the window server's library:
+The window server's library (`libhakios.dylib`, `userland/src/inject.c`) already has a
+MobileGestalt interposer for these keys and swizzles `CADisplay`'s `refreshRate`,
+`heartbeatRate`, `minimumFrameDuration` and `maximumFramesPerSecond` to 120 — so that was not
+the place after all.
 
-1. the MobileGestalt interposer (`DeviceSupports120HzRefreshRate`, `DeviceSupportsProMotion`,
-   `MaxRefreshRate`), now only in `inject_sb.c`;
-2. the display link's rate, where `inject_sb.c` sets `{0, 0, 0}` for the window server's own
-   link — a range whose maximum is 0 is CoreAnimation's "use the default", and the default
-   is the built-in 60 Hz panel.
+The place is CoreAnimation's own server render rate. It draws on **every other refresh** unless
+`CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER` is 0: that is what a phone with a 60 Hz panel wants
+and what a phone with a 120 Hz panel does not. The switch is in the table of CoreAnimation's
+own debug switches — the shared cache has it next to `CA_FORCE_120HZ` — and it was not among
+the ones given to the window server.
+
+It is now set in the window server's environment (`inject.c`, with `ca_vbl=1`) and carried in
+the boot arguments of `tools/xnu-cycle.sh`, `tools/test-120hz.sh` and `tools/iter.sh`.
+
+This is the switch the commit `c0eaa31` ("The frame rate was CoreAnimation's own 10 Hz clock:
+3.4 FPS -> 34.4 FPS") used, and it was dropped from the arguments since.
 
 The framebuffer driver is not the limit: it paces on `fb_hz` (120) and publishes
 `IOMFBDisplayRefresh` at 120 Hz, and the log says so

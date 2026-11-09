@@ -17,7 +17,8 @@ caenv=CA_DISABLE_APT=1 \
 caenv=CA_ENABLE_ALL_FRAME_RATES=1 \
 caenv=CA_HEARTBEAT_RATE=120 \
 caenv=CA_MINIMUM_FRAME_DURATION=0p0083333 \
-caenv=CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0"
+caenv=CA_ENABLE_HIGH_FRAME_RATE_RESTRICTION=0 \
+caenv=CA_ENABLE_REDUCED_SERVER_VSYNC_RENDER=0"
 XNU_ARGS=${XNU_ARGS:-$DEFAULT_ARGS}
 # the device tree offers the kernel exactly this many cores; "cpus=" in XNU_ARGS should match
 CORES=${XNU_CORES:-$(expr "$XNU_ARGS" : '.*cpus=\([0-9]*\)' || echo 1)}
