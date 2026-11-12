@@ -2,7 +2,7 @@
 
 **Date**: 2026-11-06  
 **Updated**: 2026-11-06, session 2 — the submit wait was the bottleneck, and it is fixed; the GPU is now idle 99% of the time and the frame time is somewhere else (see §7).  
-**Target Device**: Infinix GT 10 Pro (`X6739`), MediaTek Dimensity 8050 (`MT6893`, `MT6893Z_T/CZA`), Mali-G77 MC9 (Valhall v9, 9 shader cores, present mask `0x660067`), ADB Serial: `102562537K104189`.  
+**Target Device**: Infinix GT 10 Pro (`X6739`), MediaTek Dimensity 8050 (`MT6893`, `MT6893Z_T/CZA`), Mali-G77 MC9 (Valhall v9, 9 shader cores, present mask `0x660067`), ADB Serial: `XNU_SERIAL`.  
 **Target OS / System**: HakiOS (Darwin / XNU 16.5) booting iOS 16.5 rootfs via APFS (`ufs_xnusys`).
 
 ---
@@ -121,7 +121,7 @@ bash tools/mk-root.sh
 
 # 4. Run test cycle on device (300s window):
 cd /mnt/project/Misc/hakios/hakios-x6739
-HAKIOS_SERIAL=102562537K104189 XNU_SECS=300 \
+HAKIOS_SERIAL=XNU_SERIAL XNU_SECS=300 \
 XNU_ARGS="cpus=4 touchscreen=1 mali=6 mali_clk=2 ca_vbl=1 fb_hz=120 fb_ca_hz=120 fbscale=2 fbfit=3 fb_queue=1 fb_flip=1" \
 bash tools/xnu-cycle.sh
 ```
@@ -787,7 +787,7 @@ By tuning CoreAnimation display link parameters and interposing environment vari
    - Registered `com.hakios.cc` and `com.hakios.coversheet` in `inject_sb.c` allowing immediate programmatic toggling via `rwtouch notify com.hakios.cc` and `rwtouch notify com.hakios.coversheet`.
 
 ### 11.3 Device Verification
-Verified via `xnu-cycle.sh` on device `102562537K104189` (`logs/xnu-iter.log`):
+Verified via `xnu-cycle.sh` on device `XNU_SERIAL` (`logs/xnu-iter.log`):
 - `inject_report: [SpringBoard] wallpaper_view_added(_SBWallpaperSecureWindow)` — wallpaper attached exclusively to `_SBWallpaperSecureWindow`, with zero overdraw on `SBHomeScreenWindow`.
 - `inject_report: [SpringBoard] unlock(done=1)` — executed exactly once at boot.
 - App icons and glyphs composited cleanly: `attachImage: texture 120 is IOSurface 133 (97 x 76)`, `texture 123 is IOSurface 136 (103 x 103)`, `texture 126 is IOSurface 139 (101 x 101)`.

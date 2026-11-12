@@ -1,7 +1,7 @@
 # Handoff: SpringBoard Home Screen App Launch & Paging Touch Fixes on Infinix GT 10 Pro (X6739, MT6893)
 
 **Date**: 2026-11-08  
-**Target Device**: Infinix GT 10 Pro (`X6739`), MediaTek Dimensity 8050 (`MT6893`, `MT6893Z_T/CZA`), Mali-G77 MC9, ADB Serial: `102562537K104189`.  
+**Target Device**: Infinix GT 10 Pro (`X6739`), MediaTek Dimensity 8050 (`MT6893`, `MT6893Z_T/CZA`), Mali-G77 MC9, ADB Serial: `XNU_SERIAL`.  
 **Target OS / System**: HakiOS (Darwin / XNU 16.5) booting iOS 16.5 rootfs via APFS (`ufs_xnusys`).  
 **Active Slot**: `_a`  
 
