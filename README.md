@@ -53,7 +53,7 @@ all of it read out of the phone's own device tree and its own kernel command lin
 | `mtkloader/` | the bare-metal loader: MMU off, the SoC's bring-up, XNU's device tree, the boot arguments |
 | `kernel/` | this phone's drivers in XNU, as paths of the kernel tree (`kernel/README.md`) |
 | `tools/` | one run (`xnu-cycle.sh`), flashing, probes, log readers, the device-tree readers, the iOS firmware fetcher |
-| `docs/` | how each part was found, run by run; the plan (`docs/port-plan.md`); the iOS firmware ([docs/ios-firmware.md](docs/ios-firmware.md)); the touchscreen ([docs/touchscreen-ft3681.md](docs/touchscreen-ft3681.md)) and its handoff ([docs/handoff-touch-i2c0.md](docs/handoff-touch-i2c0.md)) |
+| `docs/` | how each part was found, run by run; the plan (`docs/port-plan.md`); the iOS firmware ([docs/ios-firmware.md](docs/ios-firmware.md)); the touchscreen ([docs/touchscreen-ft3681.md](docs/touchscreen-ft3681.md)); the home screen's touch ([docs/homescreen-touch-trace.md](docs/homescreen-touch-trace.md)); the GPU ([docs/gpu-port-mt6893.md](docs/gpu-port-mt6893.md)) and the backlight ([docs/brightness-mt6893.md](docs/brightness-mt6893.md)) |
 | `device.conf` | the phone and each component's state (`works` / `partial` / `missing`) |
 | `pull-firmware.sh` | the phone's firmware out of the user's own phone into `fw-*/` |
 

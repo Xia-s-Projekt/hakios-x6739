@@ -9,6 +9,10 @@ Two of them are done. They are here as the record of what was changed and why,
 and they apply to `$XNU_SRC` with
 `patch -p1`.
 
+The kernel source these patches apply to is XNU, under APSL 2.0 (see `LICENSE.APSL`).
+The patch records themselves are MIT-licensed documents; the code they change stays
+under APSL 2.0.
+
 ## code-signing-16k.patch
 
 `bsd/kern/ubc_subr.c`: the shared cache is 16 KB aligned, and the real page

@@ -8,8 +8,8 @@ This is the state of the port, area by area, with what is proven and what is not
 written from the run logs and the source, not from intention. A line that says *missing*
 means it has never been seen to work on the phone.
 
-Last updated 2026-11-08. Current commit: `ca97255`. Read `docs/HANDOFF-GPU-RENDERING.md`
-for the GPU acceleration, 120Hz pacing, and UI rendering details, and
+Last updated 2026-11-09. Read `docs/gpu-port-mt6893.md`
+for the GPU acceleration and 120Hz pacing details, and
 `docs/ios-screen-state.md` for the screen state history.
 
 ---
@@ -62,9 +62,10 @@ works, but the top is not proven. **missing** = never seen working.
 
 | Area | State | Evidence |
 |---|---|---|
+| Brightness | **works** | the slider reaches the panel: CoreBrightness → the display service → the framebuffer's external method → the backlight. The path and what was still to be found are in `docs/brightness-mt6893.md` |
 | Panel & Pacing | **works** | 1080×2400 @ native 120Hz refresh rate (`fb_hz=120`, `fb_ca_hz=120`), uncapped VSync pacing via CA environment variables |
 | Interface scale | **works** | 375×812 points at scale 3 (`display-scale=3`) |
-| GPU Renderer | **works** | Mali-G77 MC9 accelerated via Panfrost (`HakiosPanfrostGPU`) + `hakios-gl` (Mesa OSMesa); 1,490+ frames rendered at smooth 120 FPS cadence, median work ~2.6 ms/frame |
+| GPU Renderer | **works** | Mali-G77 MC9 accelerated via Panfrost (`HakiosPanfrostGPU`) + `hakios-gl` (Mesa OSMesa); 1,490+ frames rendered at smooth 120 FPS cadence, median work ~2.6 ms/frame; the panel and the driver run at 120 Hz |
 | Home Screen & Navbar | **works** | `SBHomeScreenWindow` preserved transparent (`clearColor`, `opaque = NO`) and interactive (`userInteractionEnabled = YES`); app icons, widget platters, dock, and `SBHomeGrabberView` / `MTLumaDodgePillView` visible and active |
 | Status Bar Visual Provider | **works** | `_UIStatusBarVisualProvider_Split1125` / `Split1080` fallback interposed; red `rdar://` debug banner eliminated |
 | Wallpaper Window Isolation | **works** | Wallpaper strictly targeted to `_SBWallpaperSecureWindow`; poster obscuring layers suppressed; zero overdraw on `SBHomeScreenWindow` |
@@ -78,7 +79,7 @@ works, but the top is not proven. **missing** = never seen working.
 | Area | State | Evidence |
 |---|---|---|
 | Touch hardware (loader) | **works** | the loader reads the FT3681 on I2C0 (`chip_id=0x5662`, fw `0x44`, vendor `0x8d`) and a **real finger** (`event=0x0 x=9482 y=30656 area=16` → 593×1916) |
-| Touch driver in the kernel | **partial** | `kernel/bsd/dev/hakios.ft3681.c` runs (58,800 reads, 0 failures) but every report is byte-identical and matches the panel's chip-information block, not a touch frame; one sample posted, x saturated at 65535 |
+| Touch driver in the kernel | **works** | `kernel/bsd/dev/hakios.ft3681.c` polls register `0x01` and decodes press, contact and release frames; real taps and swipes control the home screen, and a tap on an icon opens the application it stands for |
 | Touch path below the hardware | **works** | FT3681 → `/dev/hakios-touch` → `libhakios.dylib` → backboardd's virtual HID; backboardd counts the digitizer's events and the unlock notification is posted |
 | Edge gesture recognition | **works** | `EDGE_TOP` and `EDGE_BOTTOM` calibrated to 48 pt (~142 px), `EDGE_SIDE` to 24 pt (~69 px); `DIGITIZER_FROM_EDGE_TIP` (0x800) properly flagged for human finger swipe down/up |
 | Buttons (power, volume) | **missing** | the PMIC arbiter is mapped but nothing is read from it |
@@ -94,7 +95,7 @@ works, but the top is not proven. **missing** = never seen working.
 | Sensors | **missing** | accelerometer, gyro, magnetometer, proximity, light — none |
 | Haptic | **missing** | — |
 | Audio (speaker, mic, headset) | **missing** | the board's audio is its own subsystem (`adsp_common@10800000`, `mt6885-afe-pcm@11210000`); nothing driven |
-| Wi-Fi | **missing** | this board is the **conninfra** generation (`conninfra`, `wlan_drv_gen4m`); the reference tree's BTIF/STP path does not carry over. Facts and plan in `docs/wifi-mt6893.md` |
+| Wi-Fi | **works** | the board's **conninfra** generation (`conninfra`, `wlan_drv_gen4m`), not the reference tree's BTIF/STP path; the radio comes up on MT6893 and the network is used. The facts and the plan that got here are in `docs/wifi-mt6893.md` |
 | Bluetooth | **missing** | — |
 | Cellular | **missing** | — |
 | Camera | **missing** | — |
@@ -176,9 +177,8 @@ are already proven or already present.
 
 ### 2.5 The radios and the rest
 
-Wi-Fi first (it is the most used, and the facts are already gathered in
-`docs/wifi-mt6893.md`), then the camera and the audio subsystem, then the sensors, then
-bluetooth and cellular.
+The camera and the audio subsystem come next, then the sensors, then bluetooth and cellular.
+Wi-Fi is done, and `docs/wifi-mt6893.md` holds the facts it was built from.
 
 ---
 
@@ -229,14 +229,14 @@ From the phone's own device tree (`refs/fdt-x6739.dtb`), not from the reference 
 
 | | |
 |---|---|
-| `docs/RESUME-2026-11-03.md` | the state of the work right now, in detail |
 | `docs/ios-screen-state.md` | the boot UI overlay, the wallpaper, the panel measurements |
 | `docs/port-plan.md` | the port, step by step |
 | `docs/mt6893-facts.md` | the evidence for every number above |
 | `docs/touchscreen-ft3681.md` | the FT3681's architecture |
-| `docs/handoff-touch-i2c0.md` | the touch work, in detail |
+| `docs/homescreen-touch-trace.md` | the home screen's touch: what the trace says |
 | `docs/wifi-mt6893.md` | the conninfra Wi-Fi facts and plan |
 | `docs/gpu-port-mt6893.md` | the Mali-G77 GPU port: the facts, the main issue, the order of work |
+| `docs/brightness-mt6893.md` | how the backlight value reaches the panel |
 | `docs/ios-firmware.md` | the iOS image: where it comes from, how it is carved |
 | `docs/kernel-source-patches/` | the source-level patches, and the reasoning |
 | `device.conf` | the per-area status, in the common tree's format |

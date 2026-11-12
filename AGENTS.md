@@ -15,7 +15,7 @@ arguments, starts the kernel, and brings the phone back to Android afterwards. T
 user space and Metal driver live in the organisation's common repositories (`hakios-xnu-kernel`,
 `hakios-metal`).
 
-**Nothing has been booted on this phone yet.** Every area in `device.conf` is `missing`.
+**The port boots to the iOS home screen.** What works and what does not is in `device.conf`.
 
 ## The one thing to know before writing any code
 
@@ -154,5 +154,4 @@ top of the common tree). Moving them under the common repository's `devices/<nam
 
 ## State, briefly
 
-What works and what does not is in `device.conf` and `README.md`. Nothing works yet: this port is
-at step 1 of [docs/port-plan.md](docs/port-plan.md), the loader for MT6893.
+What works and what does not is in `device.conf` and `README.md`.

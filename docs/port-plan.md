@@ -157,7 +157,7 @@ device pages → the device repository of its own.
 
 1. **Where does the phone's own system live in DRAM?** *Answered.* DRAM base `0x40000000` (8 GiB). Loader links at `0x40080000`, small root ramdisk at `0x48000000`, framebuffer at `0x76a10000`.
 2. **What does the preloader leave running?** *Answered.* Display engine `OVL0_2L` is scanning at 1080x2400 (pitch 4352). GIC-v3 is initialized in EOImode=1 (loader clears to 0). UFS host controller is active and handed over.
-3. **What is the touch controller, and on which pins?** *Answered.* FocalTech FT3681 (`TM_FT3681_00`) on I2C0 (`0x11015000`) at slave `0x38`. Pins: SCL0=GPIO 204, SDA0=GPIO 205, Reset=GPIO 20, IRQ=GPIO 21 (GIC SPI 245 = GIC interrupt 277). Full architecture in `docs/touchscreen-ft3681.md`, and the state of the work in `docs/handoff-touch-i2c0.md`.
+3. **What is the touch controller, and on which pins?** *Answered.* FocalTech FT3681 (`TM_FT3681_00`) on I2C0 (`0x11015000`) at slave `0x38`. Pins: SCL0=GPIO 204, SDA0=GPIO 205, Reset=GPIO 20, IRQ=GPIO 21 (GIC SPI 245 = GIC interrupt 277). Full architecture in `docs/touchscreen-ft3681.md`.
 4. **How is the I2C0 bus driven?** *Answered and implemented.* The controller uses the **v2**
    register table with the slave address at `0x04` (the phone's own module carries `mt6873_compat`,
    and that profile has `slave_addr_ver` unset). The clock parent is `i2c_sel` in TOPCKGEN at
@@ -167,7 +167,7 @@ device pages → the device repository of its own.
    (`tools/i2c-timing.py`). SCL clock-stretch hang resolved by dropping `I2C_CTL_CLK_EXT_EN`. The
    hardware controller completes bus cycles cleanly (`DEBUGSTAT = 0x700`, `stat = 0x3`). Slave `0x38`
    NACKs because MT6360 LDO2 (`vtp`, 3.3V) on I2C5 must be enabled. Next step: power LDO2 and read
-   FT3681 Chip ID. Full details in `docs/handoff-touch-i2c0.md`.
+   FT3681 Chip ID. Full details in `docs/touchscreen-ft3681.md`.
 5. **Where is the system's partition, and how is it read?** *Half answered.* The phone's GPT has
    been read off the phone (see `docs/ios-firmware.md`): `userdata` is 226 GiB and runs to the end
    of the disk, with `flashinfo` the last partition and nothing free. The system's partition has

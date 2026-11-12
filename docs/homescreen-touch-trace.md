@@ -92,9 +92,24 @@ The touch is delivered to the window server and to the HID service, and SpringBo
 are not asked about it. The home screen's window is at the bottom of the window order, and the
 two windows at level 0 (`SBRootSceneWindow`, `_UISystemGestureWindow`) are above it.
 
-The next run traces `-[UIWindow sendEvent:]` to say which window the event is given to. That is
-the question this document leaves open: whether the event goes to one of the windows above the
-home screen, or to a window that is not on this list at all.
+The next run would trace `-[UIWindow sendEvent:]` to say which window the event is given to.
+That was the question this document left open: whether the event goes to one of the windows
+above the home screen, or to a window that is not on this list at all.
+
+### 4.1 The answer
+
+The home screen's window was at level −2, below the two windows at level 0. It is now at
+level 1, above them and below the status bar (1070) and the cover sheet (1050). With that
+alone the trace shows `SBHomeScreenWindow` taking the event, `SBIconView` reporting the start
+of its tap, and the icon's own veto answering that it had no reason to refuse.
+
+The tap then did nothing, and the second cause was in the hooks rather than in the window
+order: the wrappers that replaced `-[SBIconView _beginIconTap]` and `-[SBApplication
+iconAllowsLaunch:]` had thrown away the implementations they replaced, so the tap was
+swallowed and the launch never happened. The wrappers keep the original implementations and
+call them.
+
+A tap on an icon opens the application it stands for, confirmed on the phone by hand.
 
 ## 5. What is not the cause
 

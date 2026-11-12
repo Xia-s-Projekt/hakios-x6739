@@ -3,7 +3,7 @@
  *
  * The controller follows MediaTek's 6.1 i2c-mt65xx.c with mt6873_compat (regs v2, slave address
  * at 0x04, auto_restart, apdma_sync). Clocks: clk-mt6885.c / clk-mt6885-i2c.c. Pins:
- * pinctrl-mt6885.c. Every number is in docs/handoff-touch-i2c0.md with its source.
+ * pinctrl-mt6885.c. Every number is in docs/touchscreen-ft3681.md with its source.
  */
 #ifndef MTKI2C_H
 #define MTKI2C_H

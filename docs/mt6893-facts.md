@@ -235,7 +235,7 @@ The reference port's touch is an OmniVision TD4160, a TCM controller on SPI2. Th
 - The I2C0 clock parent is `i2c_sel` in TOPCKGEN, and the phone runs it at **124800000 Hz**
   (`univpll_d5_d4`, mux index 2) — from the phone's own clock dump, `logs/clk_summary.txt`.
 - See `docs/touchscreen-ft3681.md` for complete register mappings, APDMA clocking, and XNU driver
-  specifications, and `docs/handoff-touch-i2c0.md` for the state of the work and the next steps.
+  specifications, and `docs/touchscreen-ft3681.md` for the full touch architecture.
 
 ## Port status
 
